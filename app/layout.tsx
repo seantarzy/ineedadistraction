@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
+import { ClerkProvider } from '@clerk/nextjs';
+import Script from 'next/script';
 import "./globals.css";
+
+const GA_ID = process.env.GOOGLE_MEASUREMENT_ID;
 
 export const metadata: Metadata = {
   title: "I Need a Distraction",
-  description: "Take a quick break with brain teasers, puzzles, and fun facts!",
+  description: "Play community-made mini-games, vote for your favorites, or vibe-code your own in seconds.",
 };
 
 export default function RootLayout({
@@ -12,10 +16,23 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className="antialiased">
-        {children}
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en">
+        <body className="antialiased">
+          {children}
+          {GA_ID && (
+            <>
+              <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />
+              <Script id="ga-init" strategy="afterInteractive">{`
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', '${GA_ID}');
+              `}</Script>
+            </>
+          )}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
