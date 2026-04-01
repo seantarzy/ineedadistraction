@@ -2,11 +2,13 @@ import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { createPendingAuth } from '@/app/lib/authStore';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+export const dynamic = 'force-dynamic';
+
 const FROM = process.env.FROM_EMAIL ?? 'onboarding@resend.dev';
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000';
 
 export async function POST(req: Request) {
+  const resend = new Resend(process.env.RESEND_API_KEY);
   const { email, gameData, signInOnly } = await req.json();
 
   if (!email) {

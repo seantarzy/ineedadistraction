@@ -23,6 +23,9 @@ function toTitle(s: string) {
 
 type Step = 'idle' | 'generating' | 'email' | 'sent';
 
+// Source info for what we're remixing — either a template or a published widget
+type Source = { title: string; emoji: string; html: string; remixHint: string; id: string };
+
 export default function TemplatePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -30,6 +33,12 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
   const { isSignedIn } = useAuth();
   const template = getTemplate(id);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Source can be a template or a fetched widget
+  const [source, setSource] = useState<Source | null>(
+    template ? { title: template.title, emoji: template.emoji, html: template.html, remixHint: template.remixHint, id: template.id } : null
+  );
+  const [sourceLoading, setSourceLoading] = useState(!template);
 
   // The HTML currently displayed in the iframe
   const [currentHtml, setCurrentHtml] = useState<string>('');
@@ -57,9 +66,29 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
   const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [showPublish, setShowPublish] = useState(false);
+  const [allowRemixes, setAllowRemixes] = useState(true);
+
+  // Fetch published widget if not a template
+  useEffect(() => {
+    if (template) {
+      setSourceLoading(false);
+      return;
+    }
+    // Try loading as a published widget
+    fetch(`/api/widgets/${id}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((widget) => {
+        if (widget && widget.html && widget.remixable !== false) {
+          setSource({ title: widget.title, emoji: widget.emoji || '🎮', html: widget.html, remixHint: `Remix "${widget.title}" — describe what you want to change`, id: widget.id });
+          setCurrentHtml(widget.html);
+        }
+        setSourceLoading(false);
+      })
+      .catch(() => setSourceLoading(false));
+  }, [id, template]);
 
   useEffect(() => {
-    if (!template) return;
+    if (!source) return;
     const draftId = searchParams.get('draft');
     if (draftId && isSignedIn) {
       // Load existing draft HTML
@@ -71,21 +100,29 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             if (draft.title && draft.title !== 'Untitled Draft') setGameTitle(draft.title);
             if (draft.description) setHowToPlay(draft.description);
             setRemixCount(1); // treat draft as already having at least one remix
-          } else {
-            setCurrentHtml(template.html);
+          } else if (template) {
+            setCurrentHtml(source.html);
           }
         });
-    } else {
-      setCurrentHtml(template.html);
+    } else if (template) {
+      setCurrentHtml(source.html);
     }
     setBlockedByLimit(!isSignedIn && hasUsedCreation());
-  }, [template, isSignedIn]);
+  }, [source, isSignedIn]);
 
-  if (!template) {
+  if (sourceLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
+        <p className="text-gray-400">Loading game...</p>
+      </div>
+    );
+  }
+
+  if (!source) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-950 text-white">
         <p className="text-5xl">😕</p>
-        <p className="text-xl font-bold">Template not found</p>
+        <p className="text-xl font-bold">Game not found</p>
         <button onClick={() => router.push('/')} className="bg-purple-600 text-white px-5 py-2 rounded-xl font-semibold">
           Back to games
         </button>
@@ -141,7 +178,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             const dr = await fetch('/api/drafts', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ html: data.html, title: newTitle, description: newDesc, emoji: template!.emoji, templateId: id }),
+              body: JSON.stringify({ html: data.html, title: newTitle, description: newDesc, emoji: source!.emoji, templateId: id }),
             });
             const saved = await dr.json();
             draftIdRef.current = saved.id;
@@ -183,11 +220,12 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             title: gameTitle.trim(),
-            description: howToPlay.trim() || `Remix of ${template!.title}`,
-            emoji: template!.emoji,
+            description: howToPlay.trim() || `Remix of ${source!.title}`,
+            emoji: source!.emoji,
             html: currentHtml,
             author: 'Me',
-            tags: template!.id ? [template!.id] : [],
+            tags: source!.id ? [source!.id] : [],
+            remixable: allowRemixes,
           }),
         });
         const data = await res.json();
@@ -214,10 +252,11 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           email: email.trim(),
           gameData: {
             title: gameTitle.trim(),
-            description: howToPlay.trim() || `Remix of ${template!.title}`,
-            emoji: template!.emoji,
+            description: howToPlay.trim() || `Remix of ${source!.title}`,
+            emoji: source!.emoji,
             html: currentHtml,
             author: email.split('@')[0],
+            remixable: allowRemixes,
           },
         }),
       });
@@ -257,15 +296,15 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           ← Back
         </button>
         <div className="flex items-center gap-2">
-          <span className="text-lg">{template.emoji}</span>
-          <span className="font-bold">{template.title}</span>
+          <span className="text-lg">{source.emoji}</span>
+          <span className="font-bold">{source.title}</span>
           {hasRemixed && (
             <span className="text-xs bg-purple-800/60 text-purple-300 px-2 py-0.5 rounded-full">
               remix v{remixCount}
             </span>
           )}
           {!hasRemixed && (
-            <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">template</span>
+            <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">{template ? 'basic game' : 'original'}</span>
           )}
         </div>
         <div className="w-16" />
@@ -291,7 +330,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             srcDoc={currentHtml}
             sandbox="allow-scripts"
             className="w-full h-full block border-0"
-            title={template.title}
+            title={source.title}
           />
         </div>
 
@@ -316,7 +355,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                 <p className="text-xs text-gray-500 leading-relaxed mt-0.5">
                   {hasRemixed
                     ? 'Describe another change — each remix builds on the last.'
-                    : template.remixHint}
+                    : source.remixHint}
                 </p>
               </div>
 
@@ -340,7 +379,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                     placeholder={
                       hasRemixed
                         ? 'What else do you want to change?'
-                        : template.remixHint
+                        : source.remixHint
                     }
                     value={prompt}
                     onChange={(e) => { setPrompt(e.target.value); setPromptError(''); }}
@@ -403,6 +442,24 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                     value={howToPlay}
                     onChange={(e) => setHowToPlay(e.target.value)}
                   />
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm text-gray-300 font-medium">Allow remixes</label>
+                      <div className="relative group">
+                        <span className="text-gray-500 cursor-help text-xs">(?)</span>
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 bg-gray-700 text-gray-200 text-xs rounded-lg p-2.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity shadow-lg z-10">
+                          Other players can use your game as a starting point to create their own remix.
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAllowRemixes(!allowRemixes)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${allowRemixes ? 'bg-purple-600' : 'bg-gray-600'}`}
+                    >
+                      <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${allowRemixes ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
                   {!isSignedIn && (
                     <input
                       type="email"

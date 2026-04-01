@@ -1,3 +1,5 @@
+import { TEMPLATES } from './templates';
+
 export type Widget = {
   id: string;
   title: string;
@@ -11,6 +13,7 @@ export type Widget = {
   author?: string;
   tags?: string[];
   userId?: string; // Clerk user ID — set when created by a signed-in user
+  remixable?: boolean; // Whether others can remix this game (default true)
 };
 
 const SEED_WIDGETS: Widget[] = [
@@ -71,10 +74,26 @@ const SEED_WIDGETS: Widget[] = [
   },
 ];
 
+// Convert templates (except blank) to widgets so they appear in the game grid
+const TEMPLATE_WIDGETS: Widget[] = TEMPLATES
+  .filter((t) => t.id !== 'blank')
+  .map((t) => ({
+    id: t.id,
+    title: t.title,
+    description: t.description,
+    emoji: t.emoji,
+    type: 'builtin' as const,
+    html: t.html,
+    votes: 50,
+    createdAt: Date.now() - 86400000 * 3,
+    tags: [],
+    remixable: true,
+  }));
+
 // In-memory store — persists across hot reloads in dev
 const g = global as typeof globalThis & { _widgetStore?: Map<string, Widget> };
 if (!g._widgetStore) {
-  g._widgetStore = new Map(SEED_WIDGETS.map((w) => [w.id, w]));
+  g._widgetStore = new Map([...SEED_WIDGETS, ...TEMPLATE_WIDGETS].map((w) => [w.id, w]));
 }
 const store = g._widgetStore;
 
@@ -94,7 +113,7 @@ export function getWidget(id: string): Widget | undefined {
 
 export function addWidget(widget: Omit<Widget, 'id' | 'votes' | 'createdAt'>): Widget {
   const id = Math.random().toString(36).slice(2, 9);
-  const full: Widget = { ...widget, id, votes: 0, createdAt: Date.now() };
+  const full: Widget = { ...widget, id, votes: 0, createdAt: Date.now(), remixable: widget.remixable ?? true };
   store.set(id, full);
   return full;
 }

@@ -20,7 +20,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const { userId } = await auth();
   const body = await req.json();
-  const { title, description, emoji, html, author, tags } = body;
+  const { title, description, emoji, html, author, tags, remixable } = body;
 
   if (!title || !html) {
     return NextResponse.json({ error: 'title and html are required' }, { status: 400 });
@@ -35,6 +35,7 @@ export async function POST(req: Request) {
     author: author ?? 'Anonymous',
     tags: tags ?? [],
     userId: userId ?? undefined, // attach Clerk user ID if signed in
+    remixable: remixable ?? true,
   });
 
   return NextResponse.json(widget, { status: 201 });

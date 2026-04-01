@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 
+export const maxDuration = 60;
+
 const client = new Anthropic();
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -18,6 +20,7 @@ Start with <!DOCTYPE html> and end with </html>.
 • No localStorage, sessionStorage, or cookies
 • Must run inside: <iframe sandbox="allow-scripts" srcdoc="...">
 • CSS @import for Google Fonts is allowed (it's a stylesheet, not a script)
+• <img src="https://..."> tags are allowed for icons and sprites
 
 ═══ BEFORE YOU OUTPUT — SELF-REVIEW CHECKLIST ═══
 Go through this checklist mentally before writing a single character of output:
@@ -30,12 +33,42 @@ Go through this checklist mentally before writing a single character of output:
 □ If it's a canvas game: ctx.clearRect is called each frame
 □ If it's a DOM game: state changes actually update visible text/styles
 
+═══ ART & VISUAL STYLE ═══
+NEVER use emoji as game characters or sprites. Instead use these techniques in order of preference:
+
+1. INLINE SVG (preferred) — Draw characters, enemies, items, and UI elements as inline <svg> elements.
+   Use <animate>, <animateTransform>, or CSS @keyframes on SVG elements for idle, hit, and move animations.
+   Example: a player character as a styled SVG with a bobbing animation, an enemy with a color-pulse on hit.
+
+2. CANVAS DRAWING — For arcade/action games, draw sprites procedurally on canvas with paths, arcs, and gradients.
+   Layer multiple drawImage/path calls to build expressive characters (body + eyes + accessories).
+
+3. CSS ART — Use styled <div> elements with border-radius, gradients, box-shadow, and CSS animations
+   for simpler characters, particles, and environmental effects.
+
+4. GAME-ICONS.NET — For UI icons (abilities, items, status effects), use:
+   <img src="https://game-icons.net/icons/ffffff/000000/1x1/AUTHOR/ICON-NAME.svg">
+   Browse categories: swords, shields, potions, skulls, hearts, lightning, etc.
+   These are CC BY 3.0 — always include a small attribution line in the game footer.
+
+Combine techniques freely: SVG characters + canvas backgrounds + CSS particle effects.
+
+═══ ANIMATION GUIDELINES ═══
+• Every game entity should have at least an idle animation (bob, pulse, glow, or sway)
+• Hit/damage: flash white or red, brief scale pulse
+• Collect/score: pop + fade particle burst using CSS @keyframes
+• Transitions: fade or slide between game states (menu → play → game over)
+• Use CSS transitions for UI elements (buttons, score counters)
+• Use requestAnimationFrame for canvas; CSS @keyframes or <animate> for SVG/DOM
+
 ═══ VISUAL REQUIREMENTS ═══
 • Dark or vibrant background — avoid plain white pages
 • Large readable text: 16px minimum body, 24px+ for score/timer
 • Buttons must have visible hover and active states (cursor:pointer, color change)
 • Tap targets 44px minimum height for mobile
 • Show the game title prominently at the top
+• Use gradient backgrounds, subtle patterns, or animated backgrounds for polish
+• Add drop shadows and glow effects to make game elements pop
 
 ═══ WHAT YOU CAN BUILD ═══
 ✓ Arcade games: snake, breakout, flappy, dodge, pong-vs-AI

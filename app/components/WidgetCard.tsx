@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Widget } from '../lib/store';
 
 const CARD_GRADIENTS: Record<string, string> = {
@@ -31,6 +32,7 @@ interface Props {
 }
 
 export default function WidgetCard({ widget, onPlay }: Props) {
+  const router = useRouter();
   const [votes, setVotes] = useState(widget.votes);
   const [voted, setVoted] = useState(() => {
     if (typeof window === 'undefined') return false;
@@ -95,6 +97,16 @@ export default function WidgetCard({ widget, onPlay }: Props) {
         >
           ▶ Play
         </button>
+
+        {widget.html && widget.remixable !== false && (
+          <button
+            onClick={(e) => { e.stopPropagation(); router.push(`/template/${widget.id}`); }}
+            title="Remix this game"
+            className="bg-white/20 hover:bg-white/30 rounded-xl px-3 py-2 text-sm font-semibold transition-colors"
+          >
+            ✨
+          </button>
+        )}
 
         <button
           onClick={handleVote}

@@ -8,6 +8,7 @@ export type PendingAuth = {
     emoji: string;
     html: string;
     author: string;
+    remixable?: boolean;
   } | null; // null = sign-in only, no game to publish
   expiresAt: number;
 };

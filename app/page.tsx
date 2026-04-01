@@ -6,7 +6,6 @@ import { useAuth, UserButton, SignInButton } from "@clerk/nextjs";
 import type { Widget } from "./lib/store";
 import type { Draft } from "./lib/drafts";
 import WidgetCard from "./components/WidgetCard";
-import PlayModal from "./components/PlayModal";
 import CreateModal from "./components/CreateModal";
 
 type Sort = "trending" | "new" | "mine";
@@ -40,7 +39,6 @@ function HomeContent() {
     if (tab === "new" || tab === "mine") return tab;
     return "trending";
   });
-  const [activeWidget, setActiveWidget] = useState<Widget | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [loading, setLoading] = useState(true);
   const [myWidgets, setMyWidgets] = useState<Widget[]>([]);
@@ -295,7 +293,7 @@ function HomeContent() {
                         <WidgetCard
                           key={widget.id}
                           widget={widget}
-                          onPlay={setActiveWidget}
+                          onPlay={(w) => router.push(`/play/${w.id}`)}
                         />
                       ))}
                     </div>
@@ -319,7 +317,7 @@ function HomeContent() {
               <WidgetCard
                 key={widget.id}
                 widget={widget}
-                onPlay={setActiveWidget}
+                onPlay={(w) => router.push(`/play/${w.id}`)}
               />
             ))}
           </div>
@@ -355,13 +353,6 @@ function HomeContent() {
         )}
       </main>
 
-      {/* Modals */}
-      {activeWidget && (
-        <PlayModal
-          widget={activeWidget}
-          onClose={() => setActiveWidget(null)}
-        />
-      )}
       {showCreate && <CreateModal onClose={() => setShowCreate(false)} />}
     </div>
   );
