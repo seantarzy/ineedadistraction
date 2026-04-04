@@ -7,6 +7,7 @@ import type { Widget } from "./lib/store";
 import type { Draft } from "./lib/drafts";
 import WidgetCard from "./components/WidgetCard";
 import CreateModal from "./components/CreateModal";
+import { trackCTAClick, trackContentEngagement } from "./lib/analytics";
 
 type Sort = "trending" | "new" | "mine";
 
@@ -80,6 +81,7 @@ function HomeContent() {
   }
 
   function handleTabChange(tab: Sort) {
+    trackContentEngagement({ content_type: 'sort_tab', content_id: tab, engagement_type: 'interaction' });
     setSort(tab);
     const url = new URL(window.location.href);
     if (tab === "trending") url.searchParams.delete("tab");
@@ -116,7 +118,7 @@ function HomeContent() {
             )}
 
             <button
-              onClick={() => setShowCreate(true)}
+              onClick={() => { trackCTAClick({ cta_text: 'Create a Game', cta_location: 'header' }); setShowCreate(true); }}
               className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold px-4 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all text-sm"
             >
               ✨ Create a Game
@@ -144,7 +146,7 @@ function HomeContent() {
           </p>
           <div className="flex items-center justify-center gap-3 flex-wrap">
             <button
-              onClick={() => setShowCreate(true)}
+              onClick={() => { trackCTAClick({ cta_text: 'Create a Game', cta_location: 'hero' }); setShowCreate(true); }}
               className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold px-6 py-3 rounded-xl shadow-lg transition-all"
             >
               ✨ Create a Game
@@ -336,7 +338,7 @@ function HomeContent() {
             </p>
             <div className="flex items-center justify-center gap-3 flex-wrap">
               <button
-                onClick={() => setShowCreate(true)}
+                onClick={() => { trackCTAClick({ cta_text: 'Create a Game', cta_location: 'bottom_cta' }); setShowCreate(true); }}
                 className="bg-white text-purple-700 hover:bg-purple-50 font-bold px-7 py-3 rounded-xl shadow-md transition-all"
               >
                 ✨ Create a Game

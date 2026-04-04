@@ -4,6 +4,7 @@ import { use, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { getTemplate } from '../../lib/templates';
+import { trackResultGenerated, trackCTAClick, trackError } from '../../lib/analytics';
 
 const CREATED_KEY = 'inad_created_at';
 const LIMIT_MS = 24 * 60 * 60 * 1000;
@@ -148,6 +149,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
       if (!res.ok) throw new Error(data.error);
 
       // Save current to history for undo
+      trackResultGenerated('remix', source!.title);
       setHistory((h) => [...h, currentHtml]);
       setCurrentHtml(data.html);
       setRemixCount((n) => n + 1);
@@ -195,7 +197,9 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
       // Refocus textarea for next iteration
       setTimeout(() => textareaRef.current?.focus(), 100);
     } catch (err) {
-      setGenError(err instanceof Error ? err.message : 'Generation failed');
+      const errMsg = err instanceof Error ? err.message : 'Generation failed';
+      trackError({ error_type: 'generation_failed', error_message: errMsg, error_location: 'template_page' });
+      setGenError(errMsg);
       setStep('idle');
     }
   }
@@ -210,6 +214,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
 
   async function handlePublish() {
     if (!gameTitle.trim()) return;
+    trackCTAClick({ cta_text: 'Publish', cta_location: 'template_page', cta_destination: 'publish' });
     setEmailError('');
 
     if (isSignedIn) {

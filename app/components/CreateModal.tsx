@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { TEMPLATES } from '../lib/templates';
+import { trackToolUse } from '../lib/analytics';
 
 interface Props {
   onClose: () => void;
@@ -34,7 +35,7 @@ export default function CreateModal({ onClose }: Props) {
             {TEMPLATES.map((t) => (
               <button
                 key={t.id}
-                onClick={() => { onClose(); router.push(`/template/${t.id}`); }}
+                onClick={() => { trackToolUse('create_modal', 'select_template', t.id); onClose(); router.push(`/template/${t.id}`); }}
                 className="flex flex-col items-start gap-2 p-5 rounded-2xl border-2 border-gray-100 dark:border-gray-800 hover:border-purple-400 dark:hover:border-purple-500 bg-gray-50 dark:bg-gray-800/50 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all text-left group"
               >
                 <span className="text-3xl">{t.emoji}</span>

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Widget } from '../lib/store';
+import { trackContentEngagement, trackToolUse, trackShareClick, trackCTAClick } from '../lib/analytics';
 
 const CARD_GRADIENTS: Record<string, string> = {
   wordle: 'from-green-500 to-emerald-700',
@@ -45,11 +46,13 @@ export default function WidgetCard({ widget, onPlay }: Props) {
     e.stopPropagation();
     const stored: string[] = JSON.parse(localStorage.getItem('voted_widgets') ?? '[]');
     if (voted) {
+      trackToolUse('game', 'unlike', widget.id);
       setVoted(false);
       setVotes((v) => Math.max(0, v - 1));
       localStorage.setItem('voted_widgets', JSON.stringify(stored.filter((id) => id !== widget.id)));
       await fetch(`/api/widgets/${widget.id}/vote`, { method: 'DELETE' });
     } else {
+      trackToolUse('game', 'like', widget.id);
       setVoted(true);
       setVotes((v) => v + 1);
       localStorage.setItem('voted_widgets', JSON.stringify([...stored, widget.id]));
@@ -59,6 +62,7 @@ export default function WidgetCard({ widget, onPlay }: Props) {
 
   function handleShare(e: React.MouseEvent) {
     e.stopPropagation();
+    trackShareClick({ method: 'clipboard', content_type: 'game', content_id: widget.id });
     const url = `${window.location.origin}/play/${widget.id}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
@@ -70,7 +74,7 @@ export default function WidgetCard({ widget, onPlay }: Props) {
   return (
     <div
       className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${gradient} p-6 text-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col`}
-      onClick={() => onPlay(widget)}
+      onClick={() => { trackContentEngagement({ content_type: 'game', content_id: widget.id, engagement_type: 'interaction' }); onPlay(widget); }}
     >
       {/* Created badge */}
       {widget.type === 'user-created' && (
@@ -100,7 +104,7 @@ export default function WidgetCard({ widget, onPlay }: Props) {
 
         {widget.html && widget.remixable !== false && (
           <button
-            onClick={(e) => { e.stopPropagation(); router.push(`/template/${widget.id}`); }}
+            onClick={(e) => { e.stopPropagation(); trackCTAClick({ cta_text: 'Remix', cta_location: 'widget_card', cta_destination: `/template/${widget.id}` }); router.push(`/template/${widget.id}`); }}
             title="Remix this game"
             className="bg-white/20 hover:bg-white/30 rounded-xl px-3 py-2 text-sm font-semibold transition-colors"
           >
