@@ -1,5 +1,8 @@
-import { TEMPLATES } from './templates';
+import { prisma } from './prisma';
+import type { Widget as PrismaWidget } from '@prisma/client';
 
+// Public Widget type — matches what the rest of the app already expects
+// (createdAt as a number for backward compat with existing client code).
 export type Widget = {
   id: string;
   title: string;
@@ -12,122 +15,101 @@ export type Widget = {
   createdAt: number;
   author?: string;
   tags?: string[];
-  userId?: string; // Clerk user ID — set when created by a signed-in user
-  remixable?: boolean; // Whether others can remix this game (default true)
+  userId?: string;
+  remixable?: boolean;
 };
 
-const SEED_WIDGETS: Widget[] = [
-  {
-    id: 'wordle',
-    title: 'Wordle',
-    description: 'Guess the 5-letter word in 6 tries',
-    emoji: '🔤',
-    type: 'builtin',
-    component: 'Wordle',
-    votes: 128,
-    createdAt: Date.now() - 86400000 * 7,
-    tags: ['word', 'puzzle'],
-  },
-  {
-    id: 'connections',
-    title: 'Connections',
-    description: 'Find four groups of four related words',
-    emoji: '🔗',
-    type: 'builtin',
-    component: 'Connections',
-    votes: 94,
-    createdAt: Date.now() - 86400000 * 6,
-    tags: ['word', 'puzzle'],
-  },
-  {
-    id: 'brainteaser',
-    title: 'Brain Teaser',
-    description: 'Challenge your mind with tricky riddles',
-    emoji: '🧩',
-    type: 'builtin',
-    component: 'BrainTeaser',
-    votes: 77,
-    createdAt: Date.now() - 86400000 * 5,
-    tags: ['puzzle', 'riddle'],
-  },
-  {
-    id: 'memory',
-    title: 'Memory Game',
-    description: 'Match pairs before the clock runs out',
-    emoji: '🎴',
-    type: 'builtin',
-    component: 'MemoryGame',
-    votes: 61,
-    createdAt: Date.now() - 86400000 * 4,
-    tags: ['memory', 'speed'],
-  },
-  {
-    id: 'facts',
-    title: 'Random Facts',
-    description: 'Discover fascinating facts you never knew',
-    emoji: '💡',
-    type: 'builtin',
-    component: 'FactGenerator',
-    votes: 45,
-    createdAt: Date.now() - 86400000 * 3,
-    tags: ['trivia', 'chill'],
-  },
-];
-
-// Convert templates (except blank) to widgets so they appear in the game grid
-const TEMPLATE_WIDGETS: Widget[] = TEMPLATES
-  .filter((t) => t.id !== 'blank')
-  .map((t) => ({
-    id: t.id,
-    title: t.title,
-    description: t.description,
-    emoji: t.emoji,
-    type: 'builtin' as const,
-    html: t.html,
-    votes: 50,
-    createdAt: Date.now() - 86400000 * 3,
-    tags: [],
-    remixable: true,
-  }));
-
-// In-memory store — persists across hot reloads in dev
-const g = global as typeof globalThis & { _widgetStore?: Map<string, Widget> };
-if (!g._widgetStore) {
-  g._widgetStore = new Map([...SEED_WIDGETS, ...TEMPLATE_WIDGETS].map((w) => [w.id, w]));
-}
-const store = g._widgetStore;
-
-export function getWidgets(): Widget[] {
-  return Array.from(store.values()).sort((a, b) => b.votes - a.votes);
+function toWidget(row: PrismaWidget): Widget {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    emoji: row.emoji,
+    type: row.type as 'builtin' | 'user-created',
+    html: row.html ?? undefined,
+    component: row.component ?? undefined,
+    votes: row.votes,
+    createdAt: row.createdAt.getTime(),
+    author: row.author ?? undefined,
+    tags: row.tags,
+    userId: row.userId ?? undefined,
+    remixable: row.remixable,
+  };
 }
 
-export function getWidgetsByUser(userId: string): Widget[] {
-  return Array.from(store.values())
-    .filter((w) => w.userId === userId)
-    .sort((a, b) => b.createdAt - a.createdAt);
+export async function getWidgets(): Promise<Widget[]> {
+  const rows = await prisma.widget.findMany({ orderBy: { votes: 'desc' } });
+  return rows.map(toWidget);
 }
 
-export function getWidget(id: string): Widget | undefined {
-  return store.get(id);
+export async function getWidgetsByUser(userId: string): Promise<Widget[]> {
+  const rows = await prisma.widget.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+  });
+  return rows.map(toWidget);
 }
 
-export function addWidget(widget: Omit<Widget, 'id' | 'votes' | 'createdAt'>): Widget {
-  const id = Math.random().toString(36).slice(2, 9);
-  const full: Widget = { ...widget, id, votes: 0, createdAt: Date.now(), remixable: widget.remixable ?? true };
-  store.set(id, full);
-  return full;
+export async function getWidget(id: string): Promise<Widget | undefined> {
+  const row = await prisma.widget.findUnique({ where: { id } });
+  return row ? toWidget(row) : undefined;
 }
 
-export function voteWidget(id: string): Widget | null {
-  const widget = store.get(id);
-  if (!widget) return null;
-  widget.votes += 1;
-  return widget;
+function generateId() {
+  return Math.random().toString(36).slice(2, 9);
 }
 
-export function unvoteWidget(id: string): Widget | null {
-  const widget = store.get(id);
-  if (!widget) return null;
-  widget.votes = Math.max(0, widget.votes - 1);
-  return widget;
+export async function addWidget(
+  widget: Omit<Widget, 'id' | 'votes' | 'createdAt'>
+): Promise<Widget> {
+  const row = await prisma.widget.create({
+    data: {
+      id: generateId(),
+      title: widget.title,
+      description: widget.description,
+      emoji: widget.emoji,
+      type: widget.type,
+      html: widget.html,
+      component: widget.component,
+      author: widget.author,
+      tags: widget.tags ?? [],
+      userId: widget.userId,
+      remixable: widget.remixable ?? true,
+    },
+  });
+  return toWidget(row);
+}
+
+export async function voteWidget(id: string, voterId: string): Promise<Widget | null> {
+  // Idempotent: only count the vote if this voter hasn't already voted.
+  try {
+    await prisma.vote.create({ data: { widgetId: id, voterId } });
+  } catch {
+    // Unique constraint violation = already voted; treat as no-op.
+    const existing = await prisma.widget.findUnique({ where: { id } });
+    return existing ? toWidget(existing) : null;
+  }
+  const row = await prisma.widget.update({
+    where: { id },
+    data: { votes: { increment: 1 } },
+  });
+  return toWidget(row);
+}
+
+export async function unvoteWidget(id: string, voterId: string): Promise<Widget | null> {
+  const deleted = await prisma.vote.deleteMany({ where: { widgetId: id, voterId } });
+  if (deleted.count === 0) {
+    const existing = await prisma.widget.findUnique({ where: { id } });
+    return existing ? toWidget(existing) : null;
+  }
+  const row = await prisma.widget.update({
+    where: { id },
+    data: { votes: { decrement: 1 } },
+  });
+  // Clamp at zero in case of any drift.
+  if (row.votes < 0) {
+    const fixed = await prisma.widget.update({ where: { id }, data: { votes: 0 } });
+    return toWidget(fixed);
+  }
+  return toWidget(row);
 }

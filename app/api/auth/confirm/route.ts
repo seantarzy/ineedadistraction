@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     return NextResponse.redirect(`${BASE_URL}/?error=missing_token`);
   }
 
-  const pending = consumePendingAuth(token);
+  const pending = await consumePendingAuth(token);
 
   if (!pending) {
     return NextResponse.redirect(`${BASE_URL}/?error=invalid_token`);
@@ -24,7 +24,7 @@ export async function GET(req: Request) {
   }
 
   // Publish the game and send them to it
-  const widget = addWidget({
+  const widget = await addWidget({
     title: pending.gameData.title,
     description: pending.gameData.description,
     emoji: pending.gameData.emoji ?? '🎮',

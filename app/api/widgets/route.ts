@@ -11,10 +11,10 @@ export async function GET(req: Request) {
   if (filter === 'mine') {
     const { userId } = await auth();
     if (!userId) return NextResponse.json([]);
-    return NextResponse.json(getWidgetsByUser(userId));
+    return NextResponse.json(await getWidgetsByUser(userId));
   }
 
-  return NextResponse.json(getWidgets());
+  return NextResponse.json(await getWidgets());
 }
 
 export async function POST(req: Request) {
@@ -26,7 +26,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'title and html are required' }, { status: 400 });
   }
 
-  const widget = addWidget({
+  const widget = await addWidget({
     title,
     description: description ?? '',
     emoji: emoji ?? '🎮',

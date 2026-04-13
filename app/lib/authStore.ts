@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { prisma } from './prisma';
 
 export type PendingAuth = {
   email: string;
@@ -9,29 +10,36 @@ export type PendingAuth = {
     html: string;
     author: string;
     remixable?: boolean;
-  } | null; // null = sign-in only, no game to publish
+  } | null;
   expiresAt: number;
 };
 
-const g = global as typeof globalThis & { _authStore?: Map<string, PendingAuth> };
-if (!g._authStore) {
-  g._authStore = new Map();
-}
-const store = g._authStore;
-
-export function createPendingAuth(data: Omit<PendingAuth, 'expiresAt'>): string {
+export async function createPendingAuth(data: Omit<PendingAuth, 'expiresAt'>): Promise<string> {
   const token = crypto.randomBytes(32).toString('hex');
-  store.set(token, { ...data, expiresAt: Date.now() + 1000 * 60 * 60 * 24 });
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24);
+  await prisma.pendingAuth.create({
+    data: {
+      token,
+      email: data.email,
+      gameDataJson: data.gameData ? JSON.stringify(data.gameData) : null,
+      expiresAt,
+    },
+  });
   return token;
 }
 
-export function consumePendingAuth(token: string): PendingAuth | null {
-  const pending = store.get(token);
-  if (!pending) return null;
-  if (pending.expiresAt < Date.now()) {
-    store.delete(token);
-    return null;
-  }
-  store.delete(token);
-  return pending;
+export async function consumePendingAuth(token: string): Promise<PendingAuth | null> {
+  const row = await prisma.pendingAuth.findUnique({ where: { token } });
+  if (!row) return null;
+
+  // Always delete on consume (single-use token).
+  await prisma.pendingAuth.delete({ where: { token } }).catch(() => {});
+
+  if (row.expiresAt.getTime() < Date.now()) return null;
+
+  return {
+    email: row.email,
+    gameData: row.gameDataJson ? JSON.parse(row.gameDataJson) : null,
+    expiresAt: row.expiresAt.getTime(),
+  };
 }

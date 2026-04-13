@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const { userId } = await auth();
   if (!userId) return NextResponse.json([]);
-  return NextResponse.json(getDraftsByUser(userId));
+  return NextResponse.json(await getDraftsByUser(userId));
 }
 
 export async function POST(req: Request) {
@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   if (!html || !templateId) {
     return NextResponse.json({ error: 'html and templateId required' }, { status: 400 });
   }
-  const draft = createDraft({
+  const draft = await createDraft({
     title: title || 'Untitled Draft',
     description: description || '',
     emoji: emoji || '🎮',

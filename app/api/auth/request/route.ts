@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'gameData is required when not sign-in-only' }, { status: 400 });
   }
 
-  const token = createPendingAuth({ email, gameData: signInOnly ? null : gameData });
+  const token = await createPendingAuth({ email, gameData: signInOnly ? null : gameData });
   const confirmUrl = `${BASE_URL}/auth/confirm?token=${token}`;
 
   const isGame = !signInOnly && gameData?.title;

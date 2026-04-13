@@ -1,0 +1,68 @@
+// Prisma schema for ineedadistraction
+// Postgres on Neon (Vercel integration). Pooled URL for runtime, direct URL for migrations.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DISTRACTION_STORAGE_POSTGRES_PRISMA_URL")
+  directUrl = env("DISTRACTION_STORAGE_POSTGRES_URL_NON_POOLING")
+}
+
+model Widget {
+  id          String   @id
+  title       String
+  description String
+  emoji       String
+  type        String   // 'builtin' | 'user-created'
+  html        String?
+  component   String?
+  votes       Int      @default(0)
+  createdAt   DateTime @default(now())
+  author      String?
+  tags        String[] @default([])
+  userId      String?  // Clerk user ID
+  remixable   Boolean  @default(true)
+
+  voteRecords Vote[]
+
+  @@index([userId])
+  @@index([votes])
+  @@index([createdAt])
+}
+
+model Draft {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  emoji       String
+  html        String
+  templateId  String
+  userId      String
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Vote {
+  id        String   @id @default(cuid())
+  widgetId  String
+  voterId   String   // Clerk userId for signed-in, or anonymous client token
+  createdAt DateTime @default(now())
+
+  widget    Widget   @relation(fields: [widgetId], references: [id], onDelete: Cascade)
+
+  @@unique([widgetId, voterId])
+  @@index([widgetId])
+}
+
+model PendingAuth {
+  token        String   @id
+  email        String
+  gameDataJson String?  // JSON-serialized gameData; null = sign-in only
+  expiresAt    DateTime
+
+  @@index([expiresAt])
+}

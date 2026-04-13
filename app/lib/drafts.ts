@@ -1,3 +1,6 @@
+import { prisma } from './prisma';
+import type { Draft as PrismaDraft } from '@prisma/client';
+
 export type Draft = {
   id: string;
   title: string;
@@ -9,35 +12,63 @@ export type Draft = {
   updatedAt: number;
 };
 
-const g = global as typeof globalThis & { _draftStore?: Map<string, Draft> };
-if (!g._draftStore) g._draftStore = new Map();
-const store = g._draftStore;
-
-export function getDraftsByUser(userId: string): Draft[] {
-  return Array.from(store.values())
-    .filter((d) => d.userId === userId)
-    .sort((a, b) => b.updatedAt - a.updatedAt);
+function toDraft(row: PrismaDraft): Draft {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    emoji: row.emoji,
+    html: row.html,
+    templateId: row.templateId,
+    userId: row.userId,
+    updatedAt: row.updatedAt.getTime(),
+  };
 }
 
-export function getDraft(id: string): Draft | undefined {
-  return store.get(id);
+export async function getDraftsByUser(userId: string): Promise<Draft[]> {
+  const rows = await prisma.draft.findMany({
+    where: { userId },
+    orderBy: { updatedAt: 'desc' },
+  });
+  return rows.map(toDraft);
 }
 
-export function createDraft(draft: Omit<Draft, 'id' | 'updatedAt'>): Draft {
-  const id = Math.random().toString(36).slice(2, 9);
-  const full: Draft = { ...draft, id, updatedAt: Date.now() };
-  store.set(id, full);
-  return full;
+export async function getDraft(id: string): Promise<Draft | undefined> {
+  const row = await prisma.draft.findUnique({ where: { id } });
+  return row ? toDraft(row) : undefined;
 }
 
-export function updateDraft(id: string, updates: Partial<Omit<Draft, 'id' | 'userId'>>): Draft | null {
-  const draft = store.get(id);
-  if (!draft) return null;
-  const updated = { ...draft, ...updates, updatedAt: Date.now() };
-  store.set(id, updated);
-  return updated;
+export async function createDraft(draft: Omit<Draft, 'id' | 'updatedAt'>): Promise<Draft> {
+  const row = await prisma.draft.create({
+    data: {
+      title: draft.title,
+      description: draft.description,
+      emoji: draft.emoji,
+      html: draft.html,
+      templateId: draft.templateId,
+      userId: draft.userId,
+    },
+  });
+  return toDraft(row);
 }
 
-export function deleteDraft(id: string): boolean {
-  return store.delete(id);
+export async function updateDraft(
+  id: string,
+  updates: Partial<Omit<Draft, 'id' | 'userId' | 'updatedAt'>>
+): Promise<Draft | null> {
+  try {
+    const row = await prisma.draft.update({ where: { id }, data: updates });
+    return toDraft(row);
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteDraft(id: string): Promise<boolean> {
+  try {
+    await prisma.draft.delete({ where: { id } });
+    return true;
+  } catch {
+    return false;
+  }
 }
