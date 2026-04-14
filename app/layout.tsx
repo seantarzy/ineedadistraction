@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from '@clerk/nextjs';
 import Script from 'next/script';
+import DataDiveFeedback from "./components/DataDiveFeedback";
 import "./globals.css";
 
 const GA_ID = process.env.GOOGLE_MEASUREMENT_ID;
@@ -20,6 +21,7 @@ export default function RootLayout({
       <html lang="en">
         <body className="antialiased">
           {children}
+          <DataDiveFeedback siteSlug="ineedadistraction" accentColor="#a855f7" />
           {GA_ID && (
             <>
               <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />
