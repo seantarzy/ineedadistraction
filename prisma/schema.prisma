@@ -34,16 +34,34 @@ model Widget {
 }
 
 model Draft {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   title       String
   description String
   emoji       String
   html        String
   templateId  String
-  userId      String
-  updatedAt   DateTime @updatedAt
+  userId      String?   // Clerk user ID — null for guest drafts
+  clientId    String?   // anonymous localStorage UUID — null for signed-in drafts
+  updatedAt   DateTime  @updatedAt
+
+  messages    Message[]
 
   @@index([userId])
+  @@index([clientId])
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  draftId   String
+  role      String   // 'user' | 'assistant'
+  kind      String   // 'chat' | 'plan' | 'generate_result'
+  content   String   // text body (chat reply, plan summary, or generation summary)
+  payload   Json?    // structured data: plan{summary,steps} or generation{version, stepCount}
+  createdAt DateTime @default(now())
+
+  draft     Draft    @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([draftId, createdAt])
 }
 
 model Vote {

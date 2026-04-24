@@ -4,6 +4,7 @@ import { use, useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@clerk/nextjs';
 import { getTemplate } from '../../lib/templates';
+import { getClientId } from '../../lib/clientId';
 import { trackResultGenerated, trackCTAClick, trackError } from '../../lib/analytics';
 
 const CREATED_KEY = 'inad_created_at';
@@ -18,13 +19,27 @@ function hasUsedCreation() {
 function markCreationUsed() {
   localStorage.setItem(CREATED_KEY, String(Date.now()));
 }
-function toTitle(s: string) {
-  return s.replace(/^(a|an|the)\s+/i, '').replace(/\b\w/g, (c) => c.toUpperCase()).slice(0, 48);
+
+// Wire X-Client-Id into every API call from this page so guests can own drafts.
+function ownerHeaders(): HeadersInit {
+  const cid = getClientId();
+  return cid ? { 'x-client-id': cid } : {};
 }
 
-type Step = 'idle' | 'generating' | 'email' | 'sent';
+type Plan = { summary: string; steps: string[] };
+type GenerateResultPayload = { version: number };
+type MessagePayload = Plan | GenerateResultPayload | null;
+type Message = {
+  id: string;
+  role: 'user' | 'assistant';
+  kind: 'chat' | 'plan' | 'generate_result';
+  content: string;
+  payload: MessagePayload;
+  createdAt: number;
+};
+type ChatStatus = 'idle' | 'chatting' | 'generating';
+type PublishStep = 'idle' | 'sent';
 
-// Source info for what we're remixing — either a template or a published widget
 type Source = { title: string; emoji: string; html: string; remixHint: string; id: string };
 
 export default function TemplatePage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,35 +48,31 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
   const searchParams = useSearchParams();
   const { isSignedIn } = useAuth();
   const template = getTemplate(id);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const threadEndRef = useRef<HTMLDivElement>(null);
 
-  // Source can be a template or a fetched widget
   const [source, setSource] = useState<Source | null>(
     template ? { title: template.title, emoji: template.emoji, html: template.html, remixHint: template.remixHint, id: template.id } : null
   );
   const [sourceLoading, setSourceLoading] = useState(!template);
 
-  // The HTML currently displayed in the iframe
   const [currentHtml, setCurrentHtml] = useState<string>('');
-  // All remix steps taken so far (for undo)
   const [history, setHistory] = useState<string[]>([]);
-  // How many remixes have been done this session on THIS game
   const [remixCount, setRemixCount] = useState(0);
 
-  const [step, setStep] = useState<Step>('idle');
-  const [prompt, setPrompt] = useState('');
-  const [promptError, setPromptError] = useState('');
-  const [genError, setGenError] = useState('');
-
-  // Gate: has the user already used their one free creation elsewhere?
-  // Once they start remixing HERE, further iterations on this game are free.
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState('');
+  const [chatStatus, setChatStatus] = useState<ChatStatus>('idle');
+  const [chatError, setChatError] = useState('');
   const [blockedByLimit, setBlockedByLimit] = useState(false);
 
-  // Draft auto-save
   const draftIdRef = useRef<string | null>(searchParams.get('draft'));
   const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [genReasoningIdx, setGenReasoningIdx] = useState(0);
+  const [genElapsed, setGenElapsed] = useState(0);
 
   // Publish flow
+  const [publishStep, setPublishStep] = useState<PublishStep>('idle');
   const [gameTitle, setGameTitle] = useState('');
   const [howToPlay, setHowToPlay] = useState('');
   const [email, setEmail] = useState('');
@@ -69,13 +80,9 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
   const [showPublish, setShowPublish] = useState(false);
   const [allowRemixes, setAllowRemixes] = useState(true);
 
-  // Fetch published widget if not a template
+  // Fetch source (widget) if not a builtin template
   useEffect(() => {
-    if (template) {
-      setSourceLoading(false);
-      return;
-    }
-    // Try loading as a published widget
+    if (template) { setSourceLoading(false); return; }
     fetch(`/api/widgets/${id}`)
       .then((r) => r.ok ? r.json() : null)
       .then((widget) => {
@@ -88,21 +95,29 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
       .catch(() => setSourceLoading(false));
   }, [id, template]);
 
+  // Initial load: draft (if ?draft= present) or seed with template HTML
   useEffect(() => {
     if (!source) return;
     const draftId = searchParams.get('draft');
-    if (draftId && isSignedIn) {
-      // Load existing draft HTML
-      fetch(`/api/drafts/${draftId}`)
+    if (draftId) {
+      fetch(`/api/drafts/${draftId}`, { headers: ownerHeaders() })
         .then((r) => r.ok ? r.json() : null)
         .then((draft) => {
           if (draft) {
             setCurrentHtml(draft.html);
             if (draft.title && draft.title !== 'Untitled Draft') setGameTitle(draft.title);
             if (draft.description) setHowToPlay(draft.description);
-            setRemixCount(1); // treat draft as already having at least one remix
-          } else if (template) {
-            setCurrentHtml(source.html);
+            return fetch(`/api/drafts/${draftId}/messages`, { headers: ownerHeaders() });
+          }
+          if (template) setCurrentHtml(source.html);
+        })
+        .then((r) => r?.ok ? r.json() : null)
+        .then((msgs) => {
+          if (Array.isArray(msgs)) {
+            setMessages(msgs);
+            // Derive actual iteration count from persisted generation receipts
+            const priorGens = msgs.filter((m: Message) => m.kind === 'generate_result').length;
+            setRemixCount(priorGens);
           }
         });
     } else if (template) {
@@ -110,6 +125,26 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
     }
     setBlockedByLimit(!isSignedIn && hasUsedCreation());
   }, [source, isSignedIn]);
+
+  // Auto-scroll the thread to bottom when new messages arrive
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages.length, chatStatus]);
+
+  // Cycling reasoning-style status messages during generation, plus an elapsed counter
+  useEffect(() => {
+    if (chatStatus !== 'generating') {
+      setGenReasoningIdx(0);
+      setGenElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const tick = setInterval(() => {
+      setGenElapsed(Math.floor((Date.now() - started) / 1000));
+      setGenReasoningIdx((i) => i + 1);
+    }, 2500);
+    return () => clearInterval(tick);
+  }, [chatStatus]);
 
   if (sourceLoading) {
     return (
@@ -131,76 +166,158 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
     );
   }
 
-  async function handleGenerate() {
-    // Allow further remixes on this game even if limit was hit (remixCount > 0 means they started here)
-    if (blockedByLimit && remixCount === 0) return;
-    if (!prompt.trim()) { setPromptError('Describe what you want to change!'); return; }
+  async function saveDraft(html: string, title: string, description: string) {
+    setDraftStatus('saving');
+    try {
+      if (draftIdRef.current) {
+        await fetch(`/api/drafts/${draftIdRef.current}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+          body: JSON.stringify({ html, title, description }),
+        });
+      } else {
+        const dr = await fetch('/api/drafts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+          body: JSON.stringify({ html, title, description, emoji: source!.emoji, templateId: id }),
+        });
+        const saved = await dr.json();
+        draftIdRef.current = saved.id;
+      }
+      setDraftStatus('saved');
+      setTimeout(() => setDraftStatus('idle'), 2500);
+    } catch {
+      setDraftStatus('idle');
+    }
+  }
 
-    setPromptError(''); setGenError(''); setStep('generating');
+  // Append a message to the thread (and persist if we have a draft).
+  async function persistMessage(msg: Omit<Message, 'id' | 'createdAt'>) {
+    if (!draftIdRef.current) return null;
+    const res = await fetch(`/api/drafts/${draftIdRef.current}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+      body: JSON.stringify(msg),
+    });
+    if (!res.ok) return null;
+    const saved = await res.json();
+    setMessages((m) => [...m, saved]);
+    return saved as Message;
+  }
 
+  // Generate code from a distilled instruction (either directly from chat or from an approved plan).
+  async function runGeneration(instruction: string, plan: Plan | null) {
+    // Guest hit daily limit and hasn't started remixing here yet
+    if (blockedByLimit && remixCount === 0) {
+      setChatError('Sign in to generate more games (free, no password).');
+      return;
+    }
+
+    setChatStatus('generating');
     try {
       const res = await fetch('/api/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // Always pass the current version as the base so each remix builds on the last
-        body: JSON.stringify({ prompt, baseHtml: currentHtml }),
+        body: JSON.stringify({ prompt: instruction, baseHtml: currentHtml, plan }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
 
-      // Save current to history for undo
       trackResultGenerated('remix', source!.title);
       setHistory((h) => [...h, currentHtml]);
       setCurrentHtml(data.html);
-      setRemixCount((n) => n + 1);
+      const newVersion = remixCount + 1;
+      setRemixCount(newVersion);
 
-      // Mark creation used on first successful remix
       if (remixCount === 0) {
         markCreationUsed();
         setBlockedByLimit(true);
       }
 
-      // Auto-populate title + how-to-play from AI (user can override)
       const newTitle = data.title || gameTitle;
       const newDesc = data.description || howToPlay;
       if (data.title) setGameTitle(newTitle);
       if (data.description) setHowToPlay(newDesc);
 
-      // Auto-save draft for signed-in users
-      if (isSignedIn) {
-        setDraftStatus('saving');
-        try {
-          if (draftIdRef.current) {
-            await fetch(`/api/drafts/${draftIdRef.current}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ html: data.html, title: newTitle, description: newDesc }),
-            });
-          } else {
-            const dr = await fetch('/api/drafts', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ html: data.html, title: newTitle, description: newDesc, emoji: source!.emoji, templateId: id }),
-            });
-            const saved = await dr.json();
-            draftIdRef.current = saved.id;
-          }
-          setDraftStatus('saved');
-          setTimeout(() => setDraftStatus('idle'), 2500);
-        } catch {
-          setDraftStatus('idle');
-        }
-      }
+      await saveDraft(data.html, newTitle, newDesc);
 
-      setPrompt('');
-      setStep('idle');
-      // Refocus textarea for next iteration
-      setTimeout(() => textareaRef.current?.focus(), 100);
+      // Append a generate_result message to the thread so users see the build in context
+      await persistMessage({
+        role: 'assistant',
+        kind: 'generate_result',
+        content: `✨ Built v${newVersion} — ${data.title || 'remix applied'}`,
+        payload: { version: newVersion },
+      });
+
+      setChatStatus('idle');
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : 'Generation failed';
       trackError({ error_type: 'generation_failed', error_message: errMsg, error_location: 'template_page' });
-      setGenError(errMsg);
-      setStep('idle');
+      setChatError(errMsg);
+      setChatStatus('idle');
+    }
+  }
+
+  async function handleSend() {
+    const text = input.trim();
+    if (!text || chatStatus !== 'idle') return;
+    if (blockedByLimit && remixCount === 0) {
+      setChatError('Sign in to remix games (free, no password).');
+      return;
+    }
+    setChatError(''); setInput(''); setChatStatus('chatting');
+
+    // Optimistically show the user's message immediately
+    const optimistic: Message = {
+      id: `tmp-${Date.now()}`,
+      role: 'user',
+      kind: 'chat',
+      content: text,
+      payload: null,
+      createdAt: Date.now(),
+    };
+    setMessages((m) => [...m, optimistic]);
+
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...ownerHeaders() },
+        body: JSON.stringify({
+          draftId: draftIdRef.current,
+          userMessage: text,
+          currentHtml,
+          templateId: id,
+          emoji: source!.emoji,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Chat failed');
+
+      // Backend may have just created a draft — capture the ID
+      if (data.draftId && !draftIdRef.current) draftIdRef.current = data.draftId;
+
+      // Swap the optimistic user message for the persisted one, then add assistant
+      const assistantMessage: Message = data.message;
+      setMessages((m) => {
+        const withoutOptim = m.filter((x) => x.id !== optimistic.id);
+        return [...withoutOptim,
+          { ...optimistic, id: `user-${assistantMessage.id}` },
+          assistantMessage,
+        ];
+      });
+
+      // If the AI decided to generate directly, kick that off now
+      if (data.instruction) {
+        await runGeneration(data.instruction, null);
+      } else {
+        setChatStatus('idle');
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+    } catch (err) {
+      setMessages((m) => m.filter((x) => x.id !== optimistic.id));
+      const errMsg = err instanceof Error ? err.message : 'Chat failed';
+      setChatError(errMsg);
+      setChatStatus('idle');
     }
   }
 
@@ -218,7 +335,6 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
     setEmailError('');
 
     if (isSignedIn) {
-      // Direct publish — userId attached server-side via auth()
       try {
         const res = await fetch('/api/widgets', {
           method: 'POST',
@@ -235,9 +351,8 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        // Delete draft now that it's published
         if (draftIdRef.current) {
-          fetch(`/api/drafts/${draftIdRef.current}`, { method: 'DELETE' }).catch(() => {});
+          fetch(`/api/drafts/${draftIdRef.current}`, { method: 'DELETE', headers: ownerHeaders() }).catch(() => {});
           draftIdRef.current = null;
         }
         router.push(`/play/${data.id}?new=1`);
@@ -247,7 +362,6 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
       return;
     }
 
-    // Guest: magic link email gate
     if (!email.trim()) return;
     try {
       const res = await fetch('/api/auth/request', {
@@ -266,36 +380,19 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      setStep('sent');
+      setPublishStep('sent');
       setShowPublish(false);
     } catch (err) {
       setEmailError(err instanceof Error ? err.message : 'Failed to send email');
     }
   }
 
-  const isGenerating = step === 'generating';
+  const isBusy = chatStatus !== 'idle';
   const hasRemixed = remixCount > 0;
-
-  // Cycling status messages during generation
-  const GEN_MESSAGES = [
-    'Reading your prompt...',
-    'Designing the game loop...',
-    'Writing the HTML...',
-    'Adding interactivity...',
-    'Polishing the UI...',
-    'Almost there...',
-  ];
-  const [genMsgIdx, setGenMsgIdx] = useState(0);
-  useEffect(() => {
-    if (!isGenerating) { setGenMsgIdx(0); return; }
-    const id = setInterval(() => setGenMsgIdx((i) => (i + 1) % GEN_MESSAGES.length), 3000);
-    return () => clearInterval(id);
-  }, [isGenerating]);
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
-
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      {/* Header */}
       <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900">
         <button onClick={() => router.back()} className="text-sm text-gray-400 hover:text-white transition-colors">
           ← Back
@@ -304,9 +401,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           <span className="text-lg">{source.emoji}</span>
           <span className="font-bold">{source.title}</span>
           {hasRemixed && (
-            <span className="text-xs bg-purple-800/60 text-purple-300 px-2 py-0.5 rounded-full">
-              remix v{remixCount}
-            </span>
+            <span className="text-xs bg-purple-800/60 text-purple-300 px-2 py-0.5 rounded-full">remix v{remixCount}</span>
           )}
           {!hasRemixed && (
             <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">{template ? 'basic game' : 'original'}</span>
@@ -315,22 +410,18 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         <div className="w-16" />
       </header>
 
-      {/* ── Body ───────────────────────────────────────────────────────────── */}
+      {/* Body */}
       <div className="flex-1 min-h-0 flex flex-row">
-
-        {/* Game iframe — always visible */}
+        {/* Game iframe */}
         <div className="flex-1 min-h-0 relative">
-          {isGenerating && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-gray-950/90 backdrop-blur-sm">
-              <div className="text-5xl animate-spin">⚙️</div>
-              <p className="text-lg font-bold text-gray-200">
-                {remixCount === 0 ? 'Building your remix...' : `Applying iteration ${remixCount + 1}...`}
-              </p>
-              <p className="text-gray-500 text-sm transition-all">{GEN_MESSAGES[genMsgIdx]}</p>
-            </div>
+          {chatStatus === 'generating' && (
+            <GeneratingOverlay
+              version={remixCount + 1}
+              reasoningIdx={genReasoningIdx}
+              elapsed={genElapsed}
+            />
           )}
           <iframe
-            // key forces remount when html changes so the game restarts cleanly
             key={currentHtml.slice(0, 40)}
             srcDoc={currentHtml}
             sandbox="allow-scripts"
@@ -339,178 +430,277 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           />
         </div>
 
-        {/* ── Sidebar ────────────────────────────────────────────────────────── */}
-        <div className="shrink-0 w-80 flex flex-col border-l border-gray-800 bg-gray-900 overflow-y-auto">
-
-          {/* Remix prompt — always present */}
-          {step !== 'sent' && (
-            <div className="flex flex-col gap-3 p-5">
-              <div>
-                <div className="flex items-center justify-between">
-                  <h3 className="font-bold text-sm">
-                    {hasRemixed ? `Iterate further` : 'Remix this game'}
-                  </h3>
-                  {draftStatus === 'saving' && (
-                    <span className="text-xs text-gray-500">Saving draft...</span>
-                  )}
-                  {draftStatus === 'saved' && (
-                    <span className="text-xs text-green-400">✓ Draft saved</span>
-                  )}
-                </div>
-                <p className="text-xs text-gray-500 leading-relaxed mt-0.5">
-                  {hasRemixed
-                    ? 'Describe another change — each remix builds on the last.'
-                    : source.remixHint}
-                </p>
-              </div>
-
-              {/* Blocked: hit limit and haven't started yet */}
-              {blockedByLimit && remixCount === 0 ? (
-                <div className="bg-purple-900/30 border border-purple-700 rounded-xl p-4 text-center">
-                  <p className="font-semibold text-purple-200 text-sm mb-1">Sign in to remix games</p>
-                  <p className="text-xs text-purple-400 mb-3">It's free — no password needed.</p>
-                  <button
-                    onClick={() => router.push('/sign-in')}
-                    className="text-xs font-bold bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-lg"
-                  >
-                    Sign In / Create Account →
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <textarea
-                    ref={textareaRef}
-                    className={`w-full rounded-xl border ${promptError ? 'border-red-500' : 'border-gray-700'} bg-gray-800 text-white p-3 text-sm resize-none h-24 focus:outline-none focus:ring-2 focus:ring-purple-500`}
-                    placeholder={
-                      hasRemixed
-                        ? 'What else do you want to change?'
-                        : source.remixHint
-                    }
-                    value={prompt}
-                    onChange={(e) => { setPrompt(e.target.value); setPromptError(''); }}
-                    onKeyDown={(e) => e.key === 'Enter' && e.metaKey && handleGenerate()}
-                    disabled={isGenerating}
-                  />
-                  {promptError && <p className="text-red-400 text-xs">{promptError}</p>}
-                  {genError && <p className="text-red-400 text-xs">{genError}</p>}
-
-                  <button
-                    onClick={handleGenerate}
-                    disabled={isGenerating || !prompt.trim()}
-                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 text-white font-bold py-2.5 rounded-xl transition-all text-sm"
-                  >
-                    {isGenerating ? '⚙️ Generating...' : hasRemixed ? '✨ Apply Change' : '✨ Generate Remix'}
-                  </button>
-
-                  {/* Undo */}
-                  {history.length > 0 && (
-                    <button
-                      onClick={handleUndo}
-                      disabled={isGenerating}
-                      className="text-xs text-gray-500 hover:text-gray-300 text-center transition-colors"
-                    >
-                      ↩ Undo last change (v{remixCount} → v{remixCount - 1})
-                    </button>
-                  )}
-
-                  {!hasRemixed && (
-                    <p className="text-xs text-gray-600 text-center">You must add a twist to publish.</p>
-                  )}
-                </>
-              )}
+        {/* Sidebar — Chat thread */}
+        <div className="shrink-0 w-96 flex flex-col border-l border-gray-800 bg-gray-900">
+          {/* Thread header */}
+          <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold">💬 Chat</span>
+              {hasRemixed && <span className="text-xs text-gray-500">v{remixCount}</span>}
             </div>
+            {draftStatus === 'saving' && <span className="text-xs text-gray-500">Saving draft...</span>}
+            {draftStatus === 'saved' && <span className="text-xs text-green-400">✓ Saved</span>}
+          </div>
+
+          {/* Messages */}
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
+            {messages.length === 0 && publishStep !== 'sent' && (
+              <div className="text-xs text-gray-500 leading-relaxed bg-gray-800/50 rounded-xl p-3 border border-gray-800">
+                <p className="font-semibold text-gray-300 mb-1">👋 Tell me what to build.</p>
+                <p>{source.remixHint}</p>
+              </div>
+            )}
+
+            {messages.map((m) => <MessageBubble key={m.id} message={m} onApprovePlan={(plan) => runGeneration(plan.steps.join('. '), plan)} isBusy={isBusy} />)}
+
+            {chatStatus === 'chatting' && (
+              <div className="self-start bg-gray-800 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-gray-400 italic">
+                Thinking...
+              </div>
+            )}
+
+            {chatError && (
+              <div className="self-center text-xs text-red-400 bg-red-900/20 border border-red-900 rounded-lg px-3 py-2">
+                {chatError}
+              </div>
+            )}
+
+            <div ref={threadEndRef} />
+          </div>
+
+          {/* Input */}
+          {publishStep !== 'sent' && (
+            blockedByLimit && remixCount === 0 ? (
+              <div className="shrink-0 m-4 bg-purple-900/30 border border-purple-700 rounded-xl p-4 text-center">
+                <p className="font-semibold text-purple-200 text-sm mb-1">Sign in to remix games</p>
+                <p className="text-xs text-purple-400 mb-3">It's free — no password needed.</p>
+                <button
+                  onClick={() => router.push('/sign-in')}
+                  className="text-xs font-bold bg-gradient-to-r from-purple-600 to-pink-600 text-white px-4 py-2 rounded-lg"
+                >
+                  Sign In / Create Account →
+                </button>
+              </div>
+            ) : (
+              <div className="shrink-0 border-t border-gray-800 p-3 flex items-end gap-2">
+                <textarea
+                  ref={inputRef}
+                  className="flex-1 rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50"
+                  placeholder={hasRemixed ? 'What else do you want to change?' : source.remixHint}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                  disabled={isBusy}
+                />
+                <button
+                  onClick={handleSend}
+                  disabled={isBusy || !input.trim()}
+                  className="shrink-0 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 text-white font-bold h-10 px-4 rounded-xl transition-all text-sm"
+                >
+                  {chatStatus === 'generating' ? '⚙️' : chatStatus === 'chatting' ? '💭' : '↑'}
+                </button>
+              </div>
+            )
           )}
 
-          {/* Publish section — shown after first remix */}
-          {hasRemixed && step !== 'sent' && (
-            <div className="px-5 pb-5 flex flex-col gap-3 border-t border-gray-800 pt-4 mt-auto">
+          {/* Undo + Publish */}
+          {hasRemixed && publishStep !== 'sent' && (
+            <div className="shrink-0 border-t border-gray-800 p-3 flex flex-col gap-2">
+              {history.length > 0 && (
+                <button
+                  onClick={handleUndo}
+                  disabled={isBusy}
+                  className="text-xs text-gray-500 hover:text-gray-300 text-center transition-colors disabled:opacity-40"
+                >
+                  ↩ Undo last change (v{remixCount} → v{remixCount - 1})
+                </button>
+              )}
+
               {!showPublish ? (
                 <button
                   onClick={() => setShowPublish(true)}
-                  disabled={isGenerating}
+                  disabled={isBusy}
                   className="w-full bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-200 font-semibold py-2.5 rounded-xl transition-all text-sm border border-gray-700"
                 >
                   🚀 Publish this version
                 </button>
               ) : (
-                <div className="flex flex-col gap-3">
-                  <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Publish</p>
-                  <input
-                    className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="Game title"
-                    value={gameTitle}
-                    onChange={(e) => setGameTitle(e.target.value)}
-                  />
-                  <textarea
-                    className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    placeholder="How to play... (auto-filled by AI, you can edit)"
-                    value={howToPlay}
-                    onChange={(e) => setHowToPlay(e.target.value)}
-                  />
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm text-gray-300 font-medium">Allow remixes</label>
-                      <div className="relative group">
-                        <span className="text-gray-500 cursor-help text-xs">(?)</span>
-                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 bg-gray-700 text-gray-200 text-xs rounded-lg p-2.5 opacity-0 pointer-events-none group-hover:opacity-100 transition-opacity shadow-lg z-10">
-                          Other players can use your game as a starting point to create their own remix.
-                        </div>
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setAllowRemixes(!allowRemixes)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${allowRemixes ? 'bg-purple-600' : 'bg-gray-600'}`}
-                    >
-                      <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${allowRemixes ? 'translate-x-6' : 'translate-x-1'}`} />
-                    </button>
-                  </div>
-                  {!isSignedIn && (
-                    <input
-                      type="email"
-                      className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
-                      placeholder="your@email.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handlePublish()}
-                      autoFocus
-                    />
-                  )}
-                  {emailError && <p className="text-red-400 text-xs">{emailError}</p>}
-                  <button
-                    onClick={handlePublish}
-                    disabled={!gameTitle.trim() || (!isSignedIn && !email.trim())}
-                    className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 text-white font-bold py-2.5 rounded-xl transition-all text-sm"
-                  >
-                    {isSignedIn ? '🚀 Publish Now' : 'Send Magic Link →'}
-                  </button>
-                  <button onClick={() => setShowPublish(false)} className="text-xs text-gray-600 hover:text-gray-400 text-center">
-                    ← Keep remixing
-                  </button>
-                </div>
+                <PublishForm
+                  gameTitle={gameTitle} setGameTitle={setGameTitle}
+                  howToPlay={howToPlay} setHowToPlay={setHowToPlay}
+                  email={email} setEmail={setEmail} emailError={emailError}
+                  allowRemixes={allowRemixes} setAllowRemixes={setAllowRemixes}
+                  isSignedIn={!!isSignedIn}
+                  onPublish={handlePublish}
+                  onCancel={() => setShowPublish(false)}
+                />
               )}
             </div>
           )}
 
-          {/* Sent confirmation */}
-          {step === 'sent' && (
+          {/* Sent confirmation (guest publish) */}
+          {publishStep === 'sent' && (
             <div className="flex flex-col items-center justify-center gap-3 p-6 text-center flex-1">
               <p className="text-4xl">📬</p>
               <h3 className="font-bold text-lg">Check your inbox!</h3>
-              <p className="text-sm text-gray-400">
-                We sent a link to <strong className="text-gray-200">{email}</strong>
-              </p>
-              <p className="text-xs text-gray-600">Click it to publish your game and get your shareable link.</p>
-              <button
-                onClick={() => router.push('/')}
-                className="mt-3 bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold px-5 py-2.5 rounded-xl transition-colors text-sm"
-              >
+              <p className="text-sm text-gray-400">We sent a link to <strong className="text-gray-200">{email}</strong></p>
+              <button onClick={() => router.push('/')} className="mt-3 bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold px-5 py-2.5 rounded-xl text-sm">
                 Back to games
               </button>
             </div>
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Components ───────────────────────────────────────────────────────────────
+
+function MessageBubble({ message, onApprovePlan, isBusy }: { message: Message; onApprovePlan: (plan: Plan) => void; isBusy: boolean }) {
+  if (message.role === 'user') {
+    return (
+      <div className="self-end max-w-[85%] bg-purple-600 rounded-2xl rounded-br-md px-3 py-2 text-sm text-white">
+        {message.content}
+      </div>
+    );
+  }
+
+  if (message.kind === 'plan' && message.payload && 'summary' in message.payload) {
+    const plan = message.payload as Plan;
+    return (
+      <div className="self-start w-full flex flex-col gap-2">
+        {message.content && (
+          <div className="bg-gray-800 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-gray-200">{message.content}</div>
+        )}
+        <div className="bg-gradient-to-br from-purple-900/40 to-pink-900/20 border border-purple-700/50 rounded-2xl p-3 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-purple-300 uppercase tracking-wide">📋 Gameplan</span>
+          </div>
+          <p className="text-sm text-gray-100 leading-relaxed font-semibold">{plan.summary}</p>
+          <ol className="list-decimal list-inside text-xs text-gray-300 space-y-1 marker:text-purple-400 marker:font-bold">
+            {plan.steps.map((s, i) => <li key={i} className="leading-relaxed">{s}</li>)}
+          </ol>
+          <button
+            onClick={() => onApprovePlan(plan)}
+            disabled={isBusy}
+            className="mt-1 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 text-white font-bold py-2 rounded-xl transition-all text-sm"
+          >
+            ✨ Build this
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (message.kind === 'generate_result') {
+    return (
+      <div className="self-stretch bg-green-900/20 border border-green-800/50 rounded-xl px-3 py-2 text-sm text-green-300 font-semibold flex items-center gap-2">
+        <span>{message.content}</span>
+      </div>
+    );
+  }
+
+  // Regular assistant chat
+  return (
+    <div className="self-start max-w-[85%] bg-gray-800 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-gray-200 whitespace-pre-wrap">
+      {message.content}
+    </div>
+  );
+}
+
+// Reasoning-style phrases that cycle while Sonnet is generating — purely cosmetic
+// (we don't have real streaming reasoning tokens), but beats a static "15-30s" lie.
+const REASONING_PHRASES = [
+  'Analyzing the request',
+  'Sketching the game structure',
+  'Writing game state and logic',
+  'Wiring up controls and events',
+  'Styling visuals and feedback',
+  'Running sanity checks',
+  'Polishing edge cases',
+  'Finalizing',
+];
+
+function GeneratingOverlay({ version, reasoningIdx, elapsed }: { version: number; reasoningIdx: number; elapsed: number }) {
+  const phrase = REASONING_PHRASES[reasoningIdx % REASONING_PHRASES.length];
+  // After ~45s, acknowledge it's taking a while so users don't assume it's stuck
+  const longRunning = elapsed >= 45;
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-gray-950/90 backdrop-blur-sm px-6">
+      <div className="text-5xl animate-spin">⚙️</div>
+      <p className="text-lg font-bold text-gray-200">
+        {version === 1 ? 'Building your game...' : `Building iteration v${version}...`}
+      </p>
+      <div className="flex items-center gap-2 text-sm text-gray-400">
+        <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+        <span className="transition-all">{phrase}...</span>
+      </div>
+      <p className="text-xs text-gray-600 tabular-nums">{elapsed}s elapsed</p>
+      {longRunning && (
+        <p className="text-xs text-amber-400/80 max-w-xs text-center mt-1">
+          Complex games take a bit longer to generate. Hang tight — I'm still on it.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function PublishForm(props: {
+  gameTitle: string; setGameTitle: (v: string) => void;
+  howToPlay: string; setHowToPlay: (v: string) => void;
+  email: string; setEmail: (v: string) => void; emailError: string;
+  allowRemixes: boolean; setAllowRemixes: (v: boolean) => void;
+  isSignedIn: boolean;
+  onPublish: () => void; onCancel: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Publish</p>
+      <input
+        className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+        placeholder="Game title"
+        value={props.gameTitle}
+        onChange={(e) => props.setGameTitle(e.target.value)}
+      />
+      <textarea
+        className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        placeholder="How to play... (auto-filled by AI, you can edit)"
+        value={props.howToPlay}
+        onChange={(e) => props.setHowToPlay(e.target.value)}
+      />
+      <div className="flex items-center justify-between">
+        <label className="text-sm text-gray-300 font-medium">Allow remixes</label>
+        <button
+          type="button"
+          onClick={() => props.setAllowRemixes(!props.allowRemixes)}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${props.allowRemixes ? 'bg-purple-600' : 'bg-gray-600'}`}
+        >
+          <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${props.allowRemixes ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+      {!props.isSignedIn && (
+        <input
+          type="email"
+          className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          placeholder="your@email.com"
+          value={props.email}
+          onChange={(e) => props.setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && props.onPublish()}
+          autoFocus
+        />
+      )}
+      {props.emailError && <p className="text-red-400 text-xs">{props.emailError}</p>}
+      <button
+        onClick={props.onPublish}
+        disabled={!props.gameTitle.trim() || (!props.isSignedIn && !props.email.trim())}
+        className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 text-white font-bold py-2.5 rounded-xl transition-all text-sm"
+      >
+        {props.isSignedIn ? '🚀 Publish Now' : 'Send Magic Link →'}
+      </button>
+      <button onClick={props.onCancel} className="text-xs text-gray-600 hover:text-gray-400 text-center">
+        ← Keep remixing
+      </button>
     </div>
   );
 }
