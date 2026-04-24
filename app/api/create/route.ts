@@ -21,6 +21,7 @@ Start with <!DOCTYPE html> and end with </html>.
 • Must run inside: <iframe sandbox="allow-scripts" srcdoc="...">
 • CSS @import for Google Fonts is allowed (it's a stylesheet, not a script)
 • <img src="https://..."> tags are allowed for icons and sprites
+• Keep the code COMPACT — no comments, minimal whitespace, short variable names in hot loops. The full HTML must close cleanly with </html>. If you're running long, trim visual polish before trimming game logic.
 
 ═══ BEFORE YOU OUTPUT — SELF-REVIEW CHECKLIST ═══
 Go through this checklist mentally before writing a single character of output:
@@ -109,13 +110,46 @@ or
 {"valid": false, "issues": ["specific issue 1", "specific issue 2"]}`;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+class TruncatedOutputError extends Error {
+  constructor() { super('Generation was truncated before the game finished'); }
+}
+class OverloadedError extends Error {
+  constructor() { super('Anthropic API is overloaded'); }
+}
+
+// Retry transient API failures (overload/5xx). Only retry the *request* phase — once
+// Sonnet starts streaming a response and errors out mid-way, the SDK surfaces it here
+// and we fail fast rather than wait 30+ seconds per attempt. Total retry budget ~7s.
+async function callSonnetWithRetry(userMessage: string) {
+  const delays = [500, 1500]; // 2 retries only — if overloaded persists, fail fast
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 16000,
+        messages: [{ role: 'user', content: userMessage }],
+        system: SYSTEM_PROMPT,
+      });
+    } catch (err) {
+      lastErr = err;
+      const status = (err as { status?: number })?.status;
+      const retryable = status === 529 || status === 503 || status === 500;
+      if (!retryable || attempt === delays.length) break;
+      await new Promise((r) => setTimeout(r, delays[attempt]));
+    }
+  }
+  const status = (lastErr as { status?: number })?.status;
+  if (status === 529) throw new OverloadedError();
+  throw lastErr;
+}
+
 async function generateGame(userMessage: string): Promise<string> {
-  const message = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 8000,
-    messages: [{ role: 'user', content: userMessage }],
-    system: SYSTEM_PROMPT,
-  });
+  const message = await callSonnetWithRetry(userMessage);
+
+  // If Claude hit the token ceiling, the HTML is guaranteed incomplete —
+  // closing tags and event wiring typically fall in the tail of the file.
+  if (message.stop_reason === 'max_tokens') throw new TruncatedOutputError();
 
   const content = message.content[0];
   if (content.type !== 'text') throw new Error('Unexpected response type');
@@ -123,6 +157,9 @@ async function generateGame(userMessage: string): Promise<string> {
   let html = content.text.trim();
   const fenced = html.match(/```(?:html)?\n?([\s\S]*?)```/);
   if (fenced) html = fenced[1].trim();
+
+  // Belt-and-suspenders: every complete game must end with </html>.
+  if (!html.trimEnd().toLowerCase().endsWith('</html>')) throw new TruncatedOutputError();
 
   return html;
 }
@@ -183,19 +220,34 @@ async function validateGame(html: string): Promise<string[]> {
 
 // ─── Route ────────────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
-  const { prompt, baseHtml } = await req.json();
+  const { prompt, baseHtml, plan } = await req.json();
 
   if (!prompt) {
     return NextResponse.json({ error: 'prompt is required' }, { status: 400 });
   }
 
+  const planBlock = plan && Array.isArray(plan.steps)
+    ? `\n\nThe user approved this gameplan — implement all steps:\n${plan.summary ? `• ${plan.summary}\n` : ''}${plan.steps.map((s: string) => `  - ${s}`).join('\n')}`
+    : '';
+
   const userMessage = baseHtml
-    ? `Here is an existing browser game (complete HTML/CSS/JS):\n\n${baseHtml}\n\n---\n\nRemix this game by adding the following twist while keeping ALL original mechanics intact:\n\n${prompt}\n\nReturn the complete modified HTML document.`
-    : `Create a browser game: ${prompt}`;
+    ? `Here is an existing browser game (complete HTML/CSS/JS):\n\n${baseHtml}\n\n---\n\nRemix this game by adding the following twist while keeping ALL original mechanics intact:\n\n${prompt}${planBlock}\n\nReturn the complete modified HTML document.`
+    : `Create a browser game: ${prompt}${planBlock}`;
 
   try {
     // ── First attempt ─────────────────────────────────────────────────────────
-    let html = await generateGame(userMessage);
+    let html: string;
+    try {
+      html = await generateGame(userMessage);
+    } catch (err) {
+      // Retry once on truncation — sometimes Claude just rambles on the first try
+      if (err instanceof TruncatedOutputError) {
+        const terseRetry = `${userMessage}\n\nIMPORTANT: Keep the code TIGHT. Inline styles, minimal whitespace, no comments. The full document must fit within 16k tokens.`;
+        html = await generateGame(terseRetry);
+      } else {
+        throw err;
+      }
+    }
 
     if (!html.includes('<html') && !html.includes('<!DOCTYPE')) {
       return NextResponse.json({ error: 'Generation produced invalid output, please try again' }, { status: 500 });
@@ -213,7 +265,12 @@ ${issues.map((i) => `• ${i}`).join('\n')}
 
 Generate a corrected, fully working version.`;
 
-      html = await generateGame(retryMessage);
+      try {
+        html = await generateGame(retryMessage);
+      } catch (err) {
+        // If the retry truncates, keep the first (imperfect but complete) version
+        if (!(err instanceof TruncatedOutputError)) throw err;
+      }
     }
 
     // ── Extract title + how-to-play (runs in parallel with nothing else, fast) ─
@@ -222,6 +279,12 @@ Generate a corrected, fully working version.`;
     return NextResponse.json({ html, title: meta.title, description: meta.description });
   } catch (err) {
     console.error(err);
+    if (err instanceof TruncatedOutputError) {
+      return NextResponse.json({ error: 'Your game was too ambitious to fit in one generation — try a simpler prompt or break it into smaller remixes.' }, { status: 500 });
+    }
+    if (err instanceof OverloadedError) {
+      return NextResponse.json({ error: "Anthropic's servers are slammed right now. Give it 30 seconds and try again — your draft is saved." }, { status: 503 });
+    }
     return NextResponse.json({ error: 'Generation failed' }, { status: 500 });
   }
 }

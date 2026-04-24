@@ -1,29 +1,33 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
-import { getDraftsByUser, createDraft } from '@/app/lib/drafts';
+import { getDraftsByOwner, createDraft } from '@/app/lib/drafts';
+import { resolveOwner } from '@/app/lib/owner';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json([]);
-  return NextResponse.json(await getDraftsByUser(userId));
+export async function GET(req: Request) {
+  const owner = await resolveOwner(req);
+  if (!owner) return NextResponse.json([]);
+  return NextResponse.json(await getDraftsByOwner(owner));
 }
 
 export async function POST(req: Request) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const owner = await resolveOwner(req);
+  if (!owner) return NextResponse.json({ error: 'No owner identity — sign in or send X-Client-Id' }, { status: 401 });
+
   const { title, description, emoji, html, templateId } = await req.json();
   if (!html || !templateId) {
     return NextResponse.json({ error: 'html and templateId required' }, { status: 400 });
   }
-  const draft = await createDraft({
-    title: title || 'Untitled Draft',
-    description: description || '',
-    emoji: emoji || '🎮',
-    html,
-    templateId,
-    userId,
-  });
+
+  const draft = await createDraft(
+    {
+      title: title || 'Untitled Draft',
+      description: description || '',
+      emoji: emoji || '🎮',
+      html,
+      templateId,
+    },
+    owner
+  );
   return NextResponse.json(draft, { status: 201 });
 }

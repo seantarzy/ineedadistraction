@@ -8,9 +8,13 @@ export type Draft = {
   emoji: string;
   html: string;
   templateId: string;
-  userId: string;
+  userId: string | null;
+  clientId: string | null;
   updatedAt: number;
 };
+
+// Identifies the owner of a draft — either a signed-in user or a guest client ID.
+export type Owner = { userId: string } | { clientId: string };
 
 function toDraft(row: PrismaDraft): Draft {
   return {
@@ -21,13 +25,18 @@ function toDraft(row: PrismaDraft): Draft {
     html: row.html,
     templateId: row.templateId,
     userId: row.userId,
+    clientId: row.clientId,
     updatedAt: row.updatedAt.getTime(),
   };
 }
 
-export async function getDraftsByUser(userId: string): Promise<Draft[]> {
+function ownerWhere(owner: Owner) {
+  return 'userId' in owner ? { userId: owner.userId } : { clientId: owner.clientId };
+}
+
+export async function getDraftsByOwner(owner: Owner): Promise<Draft[]> {
   const rows = await prisma.draft.findMany({
-    where: { userId },
+    where: ownerWhere(owner),
     orderBy: { updatedAt: 'desc' },
   });
   return rows.map(toDraft);
@@ -38,7 +47,10 @@ export async function getDraft(id: string): Promise<Draft | undefined> {
   return row ? toDraft(row) : undefined;
 }
 
-export async function createDraft(draft: Omit<Draft, 'id' | 'updatedAt'>): Promise<Draft> {
+export async function createDraft(
+  draft: Omit<Draft, 'id' | 'updatedAt' | 'userId' | 'clientId'>,
+  owner: Owner
+): Promise<Draft> {
   const row = await prisma.draft.create({
     data: {
       title: draft.title,
@@ -46,7 +58,8 @@ export async function createDraft(draft: Omit<Draft, 'id' | 'updatedAt'>): Promi
       emoji: draft.emoji,
       html: draft.html,
       templateId: draft.templateId,
-      userId: draft.userId,
+      userId: 'userId' in owner ? owner.userId : null,
+      clientId: 'clientId' in owner ? owner.clientId : null,
     },
   });
   return toDraft(row);
@@ -54,7 +67,7 @@ export async function createDraft(draft: Omit<Draft, 'id' | 'updatedAt'>): Promi
 
 export async function updateDraft(
   id: string,
-  updates: Partial<Omit<Draft, 'id' | 'userId' | 'updatedAt'>>
+  updates: Partial<Omit<Draft, 'id' | 'userId' | 'clientId' | 'updatedAt'>>
 ): Promise<Draft | null> {
   try {
     const row = await prisma.draft.update({ where: { id }, data: updates });
@@ -71,4 +84,20 @@ export async function deleteDraft(id: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Is the requester allowed to read/write this draft?
+export function ownsDraft(draft: Draft, owner: Owner): boolean {
+  if ('userId' in owner) return draft.userId === owner.userId;
+  return draft.clientId === owner.clientId;
+}
+
+// Claim all drafts from a guest clientId for a signed-in user.
+// Returns the number of drafts claimed.
+export async function claimDrafts(clientId: string, userId: string): Promise<number> {
+  const result = await prisma.draft.updateMany({
+    where: { clientId },
+    data: { userId, clientId: null },
+  });
+  return result.count;
 }
