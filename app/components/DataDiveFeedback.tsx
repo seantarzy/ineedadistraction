@@ -36,6 +36,7 @@ export default function DataDiveFeedback({
   apiBase = DEFAULT_API,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const [minimized, setMinimized] = useState(false);
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
   const [screenshot, setScreenshot] = useState<File | null>(null);
@@ -135,19 +136,46 @@ export default function DataDiveFeedback({
 
   return (
     <>
-      {/* Floating button */}
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Send feedback"
-        style={{ backgroundColor: accentColor }}
-        className={`fixed ${positionClass} z-50 flex items-center gap-2 rounded-full px-4 py-3 text-white shadow-lg hover:shadow-xl transition-shadow text-sm font-medium`}
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-        Feedback
-      </button>
+      {/* Floating button — collapses to a faint icon to stay out of the user's way */}
+      {minimized ? (
+        <button
+          type="button"
+          onClick={() => setMinimized(false)}
+          aria-label="Show feedback button"
+          style={{ backgroundColor: accentColor }}
+          className={`fixed ${positionClass} z-50 rounded-full p-2 text-white shadow-sm hover:shadow-md transition-all opacity-40 hover:opacity-90`}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        </button>
+      ) : (
+        <div className={`fixed ${positionClass} z-50 flex items-stretch shadow-lg rounded-full`}>
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="Send feedback"
+            style={{ backgroundColor: accentColor }}
+            className="flex items-center gap-2 rounded-l-full pl-4 pr-3 py-3 text-white hover:brightness-110 transition-all text-sm font-medium"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Feedback
+          </button>
+          <button
+            type="button"
+            onClick={() => setMinimized(true)}
+            aria-label="Minimize feedback button"
+            style={{ backgroundColor: accentColor }}
+            className="rounded-r-full pr-3 pl-1.5 py-3 text-white/70 hover:text-white border-l border-white/20 transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* Modal */}
       {open && (

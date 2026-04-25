@@ -4,6 +4,8 @@ import { getDraft, createDraft, ownsDraft } from '@/app/lib/drafts';
 import { getMessages, addMessage } from '@/app/lib/messages';
 import { resolveOwner } from '@/app/lib/owner';
 
+export const maxDuration = 30;
+
 const client = new Anthropic();
 
 const SYSTEM = `You are the AI collaborator inside a vibe-coding tool where users remix browser mini-games through conversation.
@@ -23,8 +25,10 @@ DECISION RULES:
 - Ambiguous request → "chat" with a clarifying question
 - Simple, self-contained change → "generate"
 - Multi-step or new-mechanic change → "plan"
-- User is refining a plan you already proposed → new "plan" or "chat" depending on whether you need clarification
-- User says "build it" / "go ahead" / "yes" after a plan → "generate" with the distilled instruction from the plan
+- User refining a plan you proposed AND asking you to proceed (e.g. "go for it", "ship it", "let's build", "yes but change X") → "generate" with an updated instruction that incorporates their tweaks. Do NOT use "chat" here.
+- User refining a plan WITHOUT asking to proceed (just discussing, asking questions) → "chat" or revised "plan"
+
+CRITICAL: If your reply would say things like "Let me build that", "On it", "Shipping now", "I'll get to work", "Building this now" — you MUST use kind "generate", not "chat". Never promise to build something in a chat reply; the chat reply is the only message you'll send this turn. If you're going to build, USE GENERATE.
 
 Be brief. Never dump code. Never explain the HTML. Talk about what the player will experience.`;
 

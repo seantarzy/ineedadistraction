@@ -45,9 +45,24 @@ model Draft {
   updatedAt   DateTime  @updatedAt
 
   messages    Message[]
+  snapshots   Snapshot[]
 
   @@index([userId])
   @@index([clientId])
+}
+
+// Versioned HTML snapshots — one per successful build. Lets users revert to any
+// prior version they've shipped during the session. Cascades when the draft is deleted.
+model Snapshot {
+  id        String   @id @default(cuid())
+  draftId   String
+  version   Int
+  html      String
+  createdAt DateTime @default(now())
+
+  draft     Draft    @relation(fields: [draftId], references: [id], onDelete: Cascade)
+
+  @@index([draftId, version])
 }
 
 model Message {

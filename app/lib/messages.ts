@@ -2,12 +2,20 @@ import { prisma } from './prisma';
 import type { Message as PrismaMessage, Prisma } from '@prisma/client';
 
 export type MessageRole = 'user' | 'assistant';
-export type MessageKind = 'chat' | 'plan' | 'generate_result';
+export type MessageKind = 'chat' | 'plan' | 'generate_result' | 'step_result' | 'checkpoint_revert';
 
 // Structured payloads keyed by kind — stored as JSON in Postgres.
 export type PlanPayload = { summary: string; steps: string[] };
-export type GenerateResultPayload = { version: number; stepCount?: number };
-export type MessagePayload = PlanPayload | GenerateResultPayload | null;
+export type GenerateResultPayload = { version: number; stepCount?: number; snapshotId?: string };
+export type StepResultPayload = {
+  planMessageId: string;
+  stepIndex: number;
+  status: 'done' | 'failed';
+  errorMessage?: string;
+  durationMs?: number;
+};
+export type CheckpointRevertPayload = { targetVersion: number; snapshotId: string };
+export type MessagePayload = PlanPayload | GenerateResultPayload | StepResultPayload | CheckpointRevertPayload | null;
 
 export type Message = {
   id: string;
