@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { compactHtml } from '@/app/lib/htmlCompact';
 
 const client = new Anthropic();
 
-// Per-step generation: 30s should comfortably fit a single focused HTML edit.
-export const maxDuration = 60;
+// Per-step generation. Vercel plan caps this: Hobby silently clamps to 60s,
+// Pro supports up to 800s. 90s gives Pro users headroom for large games.
+export const maxDuration = 90;
 
 const STEP_SYSTEM_PROMPT = `You are implementing ONE step of an approved gameplan for a browser mini-game.
 
@@ -30,14 +32,32 @@ Your job: modify the HTML to implement ONLY the current step. Do not implement o
 • If the step requires new state, integrate it cleanly with existing variables
 • If the step requires new UI, place it where it makes sense in the existing layout
 
-═══ COMPACTNESS ═══
-Keep code compact — minimal whitespace, no comments, short variable names in hot loops. The output must fit in 16k tokens including the unchanged parts.`;
+═══ COMPACTNESS — CRITICAL ═══
+The input HTML is COMPACT (whitespace stripped, no comments). Mirror this style in your output:
+- No comments anywhere (no //, no /* */, no <!-- -->)
+- No newlines between HTML tags
+- Single-space delimited where possible (e.g. \`if(x){y()}\` not \`if (x) {\n  y();\n}\`)
+- Short variable names in inner loops (i, j, k, x, y, n)
+- Keep semicolons but drop unnecessary ones at end of lines
+- The full HTML output must close cleanly with </html> and fit comfortably under the token ceiling
+
+Every byte you save reduces the chance of timeout/truncation. Be ruthless.`;
 
 class TruncatedOutputError extends Error {
   constructor() { super('Step output was truncated'); }
 }
 class OverloadedError extends Error {
   constructor() { super('Anthropic API is overloaded'); }
+}
+class CreditExhaustedError extends Error {
+  constructor() { super('Anthropic API credit balance is too low'); }
+}
+
+function isCreditExhausted(err: unknown): boolean {
+  const e = err as { status?: number; error?: { error?: { message?: string } }; message?: string };
+  if (e?.status !== 400) return false;
+  const msg = e?.error?.error?.message || e?.message || '';
+  return msg.toLowerCase().includes('credit balance');
 }
 
 async function callSonnetWithRetry(userMessage: string) {
@@ -47,12 +67,13 @@ async function callSonnetWithRetry(userMessage: string) {
     try {
       return await client.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 16000,
+        max_tokens: 24000,
         messages: [{ role: 'user', content: userMessage }],
         system: STEP_SYSTEM_PROMPT,
       });
     } catch (err) {
       lastErr = err;
+      if (isCreditExhausted(err)) throw new CreditExhaustedError();
       const status = (err as { status?: number })?.status;
       const retryable = status === 529 || status === 503 || status === 500;
       if (!retryable || attempt === delays.length) break;
@@ -77,6 +98,10 @@ export async function POST(req: Request) {
   const currentStep = allSteps[stepIndex];
   const numbered = allSteps.map((s: string, i: number) => `${i === stepIndex ? '→' : i < stepIndex ? '✓' : ' '} ${i + 1}. ${s}`).join('\n');
 
+  // Compact the HTML — strips comments and collapses whitespace. Saves ~25-35% tokens
+  // both in input (cheaper, faster TTFT) and output (Sonnet mirrors compact style).
+  const compactedHtml = compactHtml(currentHtml);
+
   const userMessage = `═══ PLAN ═══
 ${planSummary || '(no summary)'}
 
@@ -86,11 +111,11 @@ ${numbered}
 ═══ CURRENT STEP TO IMPLEMENT ═══
 ${currentStep}
 
-═══ CURRENT HTML ═══
-${currentHtml}
+═══ CURRENT HTML (compact form — preserve this style in output) ═══
+${compactedHtml}
 
 ═══ TASK ═══
-Modify the HTML above to implement ONLY the current step. Return the complete modified HTML.`;
+Modify the HTML above to implement ONLY the current step. Return the complete modified HTML in the same compact form.`;
 
   try {
     const message = await callSonnetWithRetry(userMessage);
@@ -113,6 +138,9 @@ Modify the HTML above to implement ONLY the current step. Return the complete mo
     console.error(err);
     if (err instanceof TruncatedOutputError) {
       return NextResponse.json({ error: 'This step produced too much code to fit in one generation. Try splitting it into smaller steps.' }, { status: 500 });
+    }
+    if (err instanceof CreditExhaustedError) {
+      return NextResponse.json({ error: "AI service is temporarily unavailable. The site owner has been notified." }, { status: 503 });
     }
     if (err instanceof OverloadedError) {
       return NextResponse.json({ error: "Anthropic's servers are slammed. Try retrying this step in a moment." }, { status: 503 });

@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
+import { compactHtml } from '@/app/lib/htmlCompact';
 
-export const maxDuration = 60;
+// Pro plan caps maxDuration; Hobby silently clamps to 60. 90s gives Pro headroom.
+export const maxDuration = 90;
 
 const client = new Anthropic();
 
@@ -116,6 +118,18 @@ class TruncatedOutputError extends Error {
 class OverloadedError extends Error {
   constructor() { super('Anthropic API is overloaded'); }
 }
+class CreditExhaustedError extends Error {
+  constructor() { super('Anthropic API credit balance is too low'); }
+}
+
+// Detect Anthropic's "credit balance too low" error which arrives as a 400
+// with a specific message string. We treat it as terminal — no retries.
+function isCreditExhausted(err: unknown): boolean {
+  const e = err as { status?: number; error?: { error?: { message?: string } }; message?: string };
+  if (e?.status !== 400) return false;
+  const msg = e?.error?.error?.message || e?.message || '';
+  return msg.toLowerCase().includes('credit balance');
+}
 
 // Retry transient API failures (overload/5xx). Only retry the *request* phase — once
 // Sonnet starts streaming a response and errors out mid-way, the SDK surfaces it here
@@ -127,12 +141,14 @@ async function callSonnetWithRetry(userMessage: string) {
     try {
       return await client.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 16000,
+        max_tokens: 24000,
         messages: [{ role: 'user', content: userMessage }],
         system: SYSTEM_PROMPT,
       });
     } catch (err) {
       lastErr = err;
+      // Don't retry credit-exhausted errors — they're terminal until the dev tops up
+      if (isCreditExhausted(err)) throw new CreditExhaustedError();
       const status = (err as { status?: number })?.status;
       const retryable = status === 529 || status === 503 || status === 500;
       if (!retryable || attempt === delays.length) break;
@@ -230,8 +246,10 @@ export async function POST(req: Request) {
     ? `\n\nThe user approved this gameplan — implement all steps:\n${plan.summary ? `• ${plan.summary}\n` : ''}${plan.steps.map((s: string) => `  - ${s}`).join('\n')}`
     : '';
 
+  const compactedBase = baseHtml ? compactHtml(baseHtml) : '';
+
   const userMessage = baseHtml
-    ? `Here is an existing browser game (complete HTML/CSS/JS):\n\n${baseHtml}\n\n---\n\nRemix this game by adding the following twist while keeping ALL original mechanics intact:\n\n${prompt}${planBlock}\n\nReturn the complete modified HTML document.`
+    ? `Here is an existing browser game (compact form — preserve this style in output):\n\n${compactedBase}\n\n---\n\nRemix this game by adding the following twist while keeping ALL original mechanics intact:\n\n${prompt}${planBlock}\n\nReturn the complete modified HTML document in the same compact form.`
     : `Create a browser game: ${prompt}${planBlock}`;
 
   try {
@@ -281,6 +299,9 @@ Generate a corrected, fully working version.`;
     console.error(err);
     if (err instanceof TruncatedOutputError) {
       return NextResponse.json({ error: 'Your game was too ambitious to fit in one generation — try a simpler prompt or break it into smaller remixes.' }, { status: 500 });
+    }
+    if (err instanceof CreditExhaustedError) {
+      return NextResponse.json({ error: "AI service is temporarily unavailable. The site owner has been notified." }, { status: 503 });
     }
     if (err instanceof OverloadedError) {
       return NextResponse.json({ error: "Anthropic's servers are slammed right now. Give it 30 seconds and try again — your draft is saved." }, { status: 503 });

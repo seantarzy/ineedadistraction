@@ -15,7 +15,7 @@ Each turn, classify your response as one of three kinds and return ONLY JSON:
 1. "chat" — for clarifying questions, discussion, suggestions without building yet, acknowledgements.
    {"kind": "chat", "content": "your reply, conversational"}
 
-2. "plan" — when the user wants a complex change (new mechanics, genre shift, or multiple coordinated changes). Propose 4-6 concrete player-facing steps and wait for approval.
+2. "plan" — when the user wants a complex change (new mechanics, genre shift, or multiple coordinated changes). Propose 3-5 chunky, meaningful player-facing steps and wait for approval. Fewer big steps beats many tiny ones — each step triggers a full code regeneration, so prefer steps that bundle related changes (e.g. "add level system with progression and HUD display" instead of three separate steps).
    {"kind": "plan", "content": "short intro sentence before the plan", "plan": {"summary": "one-sentence description", "steps": ["what the player sees step 1", "step 2", ...]}}
 
 3. "generate" — for simple, clear changes you can ship directly (single tweaks, color/speed changes, swap one element).
@@ -113,6 +113,12 @@ export async function POST(req: Request) {
     parsed = parseAssistant(text);
   } catch (err) {
     console.error(err);
+    // Detect Anthropic credit-balance errors and surface them with a friendly message
+    const e = err as { status?: number; error?: { error?: { message?: string } }; message?: string };
+    const msg = e?.error?.error?.message || e?.message || '';
+    if (e?.status === 400 && msg.toLowerCase().includes('credit balance')) {
+      return NextResponse.json({ error: "AI service is temporarily unavailable. The site owner has been notified." }, { status: 503 });
+    }
     return NextResponse.json({ error: 'Chat failed' }, { status: 500 });
   }
 
