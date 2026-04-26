@@ -27,7 +27,8 @@ interface Props {
 }
 
 const DEFAULT_API = "https://data-dive-sean-tarzys-projects.vercel.app";
-const MAX_SCREENSHOT_SIZE = 5 * 1024 * 1024; // 5 MB
+const MAX_ATTACHMENT_SIZE = 20 * 1024 * 1024; // 20 MB — supports multi-page illustrated PDFs
+const ACCEPTED_MIME = "image/png,image/jpeg,image/gif,image/webp,application/pdf";
 
 export default function DataDiveFeedback({
   siteSlug,
@@ -39,10 +40,12 @@ export default function DataDiveFeedback({
   const [minimized, setMinimized] = useState(false);
   const [message, setMessage] = useState("");
   const [email, setEmail] = useState("");
-  const [screenshot, setScreenshot] = useState<File | null>(null);
-  const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [captions, setCaptions] = useState<string[]>([]);
+  const [previews, setPreviews] = useState<(string | null)[]>([]);
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -54,32 +57,57 @@ export default function DataDiveFeedback({
   }, [open]);
 
   useEffect(() => {
-    if (!screenshot) {
-      setScreenshotPreview(null);
-      return;
-    }
-    const url = URL.createObjectURL(screenshot);
-    setScreenshotPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [screenshot]);
+    const urls = attachments.map((f) => (f.type.startsWith("image/") ? URL.createObjectURL(f) : null));
+    setPreviews(urls);
+    return () => {
+      for (const u of urls) if (u) URL.revokeObjectURL(u);
+    };
+  }, [attachments]);
 
-  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.size > MAX_SCREENSHOT_SIZE) {
-      setErrorMsg("Screenshot too large (max 5MB)");
-      return;
+  function addFiles(files: File[]) {
+    if (files.length === 0) return;
+    const accepted: File[] = [];
+    for (const file of files) {
+      if (file.size > MAX_ATTACHMENT_SIZE) {
+        setErrorMsg(`${file.name}: file too large (max 20MB)`);
+        continue;
+      }
+      if (!file.type.startsWith("image/") && file.type !== "application/pdf") {
+        setErrorMsg(`${file.name}: only images and PDFs are accepted`);
+        continue;
+      }
+      accepted.push(file);
     }
-    if (!file.type.startsWith("image/")) {
-      setErrorMsg("Please select an image file");
-      return;
+    if (accepted.length > 0) {
+      setAttachments((prev) => [...prev, ...accepted]);
+      setCaptions((prev) => [...prev, ...accepted.map(() => "")]);
     }
-    setScreenshot(file);
-    setErrorMsg("");
   }
 
-  function clearScreenshot() {
-    setScreenshot(null);
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    addFiles(Array.from(e.target.files || []));
+    // Reset the input so the same file can be re-picked after removal
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOver(false);
+    addFiles(Array.from(e.dataTransfer.files));
+  }
+
+  function removeAttachment(index: number) {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+    setCaptions((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function setCaption(index: number, value: string) {
+    setCaptions((prev) => prev.map((c, i) => (i === index ? value : c)));
+  }
+
+  function clearAttachments() {
+    setAttachments([]);
+    setCaptions([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -94,13 +122,16 @@ export default function DataDiveFeedback({
       const page = typeof window !== "undefined" ? window.location.pathname : undefined;
       let res: Response;
 
-      if (screenshot) {
+      if (attachments.length > 0) {
         const formData = new FormData();
         formData.append("siteSlug", siteSlug);
         formData.append("message", message);
         if (email) formData.append("email", email);
         if (page) formData.append("page", page);
-        formData.append("screenshot", screenshot);
+        for (let i = 0; i < attachments.length; i++) {
+          formData.append("attachments", attachments[i]);
+          formData.append("captions", captions[i] || "");
+        }
         res = await fetch(`${apiBase}/api/feedback`, { method: "POST", body: formData });
       } else {
         res = await fetch(`${apiBase}/api/feedback`, {
@@ -122,7 +153,7 @@ export default function DataDiveFeedback({
         setOpen(false);
         setMessage("");
         setEmail("");
-        clearScreenshot();
+        clearAttachments();
         setStatus("idle");
       }, 2000);
     } catch (err) {
@@ -229,41 +260,76 @@ export default function DataDiveFeedback({
                   className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
 
-                {/* Screenshot uploader */}
+                {/* Attachments uploader — images + PDFs, multiple files, drag-and-drop */}
                 <div>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    accept={ACCEPTED_MIME}
+                    multiple
                     onChange={handleFileSelect}
                     className="hidden"
                   />
-                  {screenshot && screenshotPreview ? (
-                    <div className="relative inline-block">
-                      <img src={screenshotPreview} alt="Screenshot preview" className="max-h-32 rounded-lg border border-gray-200 dark:border-gray-700" />
-                      <button
-                        type="button"
-                        onClick={clearScreenshot}
-                        className="absolute -top-2 -right-2 bg-gray-800 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm hover:bg-gray-700"
-                        aria-label="Remove screenshot"
-                      >
-                        ×
-                      </button>
+                  {attachments.length > 0 && (
+                    <div className="flex flex-col gap-2 mb-2">
+                      {attachments.map((file, i) => (
+                        <div key={i} className="flex items-start gap-2">
+                          <div className="relative flex-shrink-0">
+                            {previews[i] ? (
+                              <img src={previews[i]!} alt={file.name} className="h-16 w-16 object-cover rounded-lg border border-gray-200 dark:border-gray-700" />
+                            ) : (
+                              <div className="h-16 w-16 flex flex-col items-center justify-center rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-1">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                  <polyline points="14 2 14 8 20 8"/>
+                                </svg>
+                                <span className="text-[10px] text-gray-500 mt-1 truncate max-w-full">{file.name.split('.').pop()?.toUpperCase()}</span>
+                              </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => removeAttachment(i)}
+                              className="absolute -top-2 -right-2 bg-gray-800 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs hover:bg-gray-700"
+                              aria-label={`Remove ${file.name}`}
+                            >
+                              ×
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            value={captions[i] || ""}
+                            onChange={(e) => setCaption(i, e.target.value)}
+                            placeholder="Add a note for this image (optional)"
+                            maxLength={200}
+                            className="flex-1 self-center px-2 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          />
+                        </div>
+                      ))}
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 px-3 py-2 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg w-full justify-center"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                        <circle cx="8.5" cy="8.5" r="1.5"/>
-                        <polyline points="21 15 16 10 5 21"/>
-                      </svg>
-                      Attach screenshot (optional)
-                    </button>
                   )}
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click(); }}
+                    className={`flex items-center gap-2 text-sm px-3 py-2 border border-dashed rounded-lg w-full justify-center cursor-pointer transition-colors ${
+                      dragOver
+                        ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300"
+                        : "border-gray-300 dark:border-gray-600 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                    }`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                    </svg>
+                    {dragOver
+                      ? "Drop files to attach"
+                      : attachments.length === 0
+                        ? "Drop or click to attach screenshots / PDFs"
+                        : "Drop or click to add another file"}
+                  </div>
                 </div>
 
                 {errorMsg && <p className="text-sm text-red-500">{errorMsg}</p>}
