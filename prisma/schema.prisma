@@ -99,3 +99,14 @@ model PendingAuth {
 
   @@index([expiresAt])
 }
+
+// Pre-launch waitlist captures. Each row = one person who's interested in
+// early access. We email them when we open the doors.
+model Waitlist {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  source    String?  // optional referrer / utm hint
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

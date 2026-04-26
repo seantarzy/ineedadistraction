@@ -1,369 +1,217 @@
-'use client';
+'use client'
 
-import { useState, useEffect, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth, UserButton, SignInButton } from "@clerk/nextjs";
-import type { Widget } from "./lib/store";
-import type { Draft } from "./lib/drafts";
-import WidgetCard from "./components/WidgetCard";
-import CreateModal from "./components/CreateModal";
-import { trackCTAClick, trackContentEngagement } from "./lib/analytics";
+import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
+import { useAuth, useUser, SignInButton } from '@clerk/nextjs'
+import { isAdmin } from './lib/admin'
 
-type Sort = "trending" | "new" | "mine";
+type Status = 'idle' | 'submitting' | 'success' | 'error'
 
-function WelcomeBanner({ onDismiss }: { onDismiss: () => void }) {
-  return (
-    <div className="bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-2xl p-4 mb-6 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <span className="text-2xl">🎉</span>
-        <p className="font-semibold">
-          You're signed in! Create unlimited games and manage your creations.
-        </p>
-      </div>
-      <button
-        onClick={onDismiss}
-        className="opacity-70 hover:opacity-100 text-lg ml-4"
-      >
-        ✕
-      </button>
-    </div>
-  );
-}
+export default function WaitlistPage() {
+  const router = useRouter()
+  const { isSignedIn, isLoaded } = useAuth()
+  const { user } = useUser()
+  const [email, setEmail] = useState('')
+  const [status, setStatus] = useState<Status>('idle')
+  const [error, setError] = useState('')
+  const [count, setCount] = useState<number | null>(null)
 
-function HomeContent() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const { isSignedIn } = useAuth();
-  const [widgets, setWidgets] = useState<Widget[]>([]);
-  const [sort, setSort] = useState<Sort>(() => {
-    const tab = searchParams.get("tab");
-    if (tab === "new" || tab === "mine") return tab;
-    return "trending";
-  });
-  const [showCreate, setShowCreate] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [myWidgets, setMyWidgets] = useState<Widget[]>([]);
-  const [myLoading, setMyLoading] = useState(false);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [deletingDraft, setDeletingDraft] = useState<string | null>(null);
-  const [showWelcome, setShowWelcome] = useState(
-    searchParams.get("welcome") === "1"
-  );
-
+  // Admin bypass — signed-in admins skip the waitlist and land on the real app.
+  // Non-admin signed-in users see their Clerk user ID logged so the site owner
+  // can paste it into lib/admin.ts to grant themselves access.
   useEffect(() => {
-    fetch("/api/widgets")
-      .then((r) => r.json())
-      .then((data) => {
-        setWidgets(data);
-        setLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (sort === "mine" && isSignedIn) {
-      setMyLoading(true);
-      Promise.all([
-        fetch("/api/widgets?filter=mine").then((r) => r.json()),
-        fetch("/api/drafts").then((r) => r.json())
-      ]).then(([widgets, draftData]) => {
-        setMyWidgets(widgets);
-        setDrafts(draftData);
-        setMyLoading(false);
-      });
+    if (!isLoaded || !isSignedIn || !user) return
+    if (isAdmin(user.id)) {
+      router.replace('/dashboard')
+    } else {
+      // Print to console so first-time setup is one copy/paste:
+      // open devtools, sign in, grab the ID, paste into app/lib/admin.ts.
+      console.log(
+        `[ineedadistraction] Signed in but not admin. Your Clerk user ID:\n  ${user.id}\n` +
+          `Add it to app/lib/admin.ts → ADMIN_CLERK_IDS to bypass the waitlist.`
+      )
     }
-  }, [sort, isSignedIn]);
+  }, [isLoaded, isSignedIn, user, router])
 
-  async function handleDeleteDraft(draftId: string) {
-    setDeletingDraft(draftId);
-    await fetch(`/api/drafts/${draftId}`, { method: "DELETE" });
-    setDrafts((prev) => prev.filter((d) => d.id !== draftId));
-    setDeletingDraft(null);
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (status === 'submitting' || !email.trim()) return
+    setStatus('submitting')
+    setError('')
+    try {
+      const res = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim(), source: 'home' }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data.error || 'Something went wrong')
+        setStatus('error')
+        return
+      }
+      setCount(data.total ?? null)
+      setStatus('success')
+    } catch {
+      setError('Network error — try again?')
+      setStatus('error')
+    }
   }
-
-  function handleTabChange(tab: Sort) {
-    trackContentEngagement({ content_type: 'sort_tab', content_id: tab, engagement_type: 'interaction' });
-    setSort(tab);
-    const url = new URL(window.location.href);
-    if (tab === "trending") url.searchParams.delete("tab");
-    else url.searchParams.set("tab", tab);
-    window.history.replaceState({}, "", url.toString());
-  }
-
-  const sorted = [...widgets].sort((a, b) =>
-    sort === "trending" ? b.votes - a.votes : b.createdAt - a.createdAt
-  );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-blue-50 dark:from-gray-900 dark:via-purple-900 dark:to-slate-900">
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-white/20 dark:border-gray-800/40">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black bg-gradient-to-r from-purple-600 via-pink-600 to-blue-600 bg-clip-text text-transparent leading-tight">
-              I Need a Distraction
-            </h1>
-            <p className="text-xs text-gray-400 hidden sm:block">
-              Quick games. Community-made. Instant fun.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {isSignedIn ? (
-              <UserButton />
-            ) : (
-              <SignInButton mode="redirect">
-                <button className="text-sm font-semibold text-gray-600 dark:text-gray-300 hover:text-purple-600 dark:hover:text-purple-400 px-3 py-2 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-all">
-                  Sign In
-                </button>
-              </SignInButton>
-            )}
-
-            <button
-              onClick={() => { trackCTAClick({ cta_text: 'Create a Game', cta_location: 'header' }); setShowCreate(true); }}
-              className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold px-4 py-2.5 rounded-xl shadow-md hover:shadow-lg transition-all text-sm"
-            >
-              ✨ Create a Game
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        {showWelcome && (
-          <WelcomeBanner onDismiss={() => setShowWelcome(false)} />
-        )}
-
-        {/* Hero */}
-        <div className="text-center mb-10">
-          <h2 className="text-4xl sm:text-5xl font-black text-gray-900 dark:text-white mb-3">
-            Because everyone needs a break{" "}
-            <span className="bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
-              ✨
-            </span>
-          </h2>
-          <p className="text-gray-500 dark:text-gray-400 text-lg max-w-xl mx-auto mb-6">
-            Play community-made mini-games, vote for your favorites, or
-            vibe-code your own in seconds.
-          </p>
-          <div className="flex items-center justify-center gap-3 flex-wrap">
-            <button
-              onClick={() => { trackCTAClick({ cta_text: 'Create a Game', cta_location: 'hero' }); setShowCreate(true); }}
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold px-6 py-3 rounded-xl shadow-lg transition-all"
-            >
-              ✨ Create a Game
-            </button>
-            {!isSignedIn && (
-              <SignInButton mode="redirect">
-                <button className="bg-white dark:bg-gray-800 hover:bg-purple-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold px-6 py-3 rounded-xl shadow-md border border-gray-200 dark:border-gray-700 transition-all">
-                  Create Free Account
-                </button>
-              </SignInButton>
-            )}
-          </div>
+    <main className="relative min-h-dvh overflow-hidden bg-[#0a0612] text-white">
+      <FloatingTiles />
+      <div className="relative z-10 mx-auto flex min-h-dvh max-w-3xl flex-col items-center justify-center px-6 py-16">
+        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-xs font-medium uppercase tracking-widest text-purple-300">
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-purple-400" />
+          early access · spring &rsquo;26
         </div>
 
-        {/* Sort tabs */}
-        <div className="flex items-center gap-2 mb-6">
-          {(
-            [
-              ["trending", "🔥 Trending"],
-              ["new", "🆕 New"],
-              ["mine", "👤 My Games"]
-            ] as [Sort, string][]
-          ).map(([s, label]) => (
-            <button
-              key={s}
-              onClick={() => handleTabChange(s)}
-              className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                sort === s
-                  ? "bg-purple-600 text-white shadow-md"
-                  : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-gray-700"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-          <span className="ml-auto text-sm text-gray-400">
-            {sort === "mine"
-              ? `${myWidgets.length} games`
-              : `${widgets.length} games`}
+        <h1 className="text-center text-5xl font-extrabold tracking-tight md:text-7xl">
+          The AI playground
+          <br />
+          <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-orange-300 bg-clip-text text-transparent">
+            for games that don&rsquo;t exist yet.
           </span>
-        </div>
+        </h1>
 
-        {/* Game grid */}
-        {sort === "mine" ? (
-          !isSignedIn ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
-              <p className="text-5xl">🔐</p>
-              <h3 className="text-xl font-bold text-gray-800 dark:text-white">
-                Sign in to see your games
-              </h3>
-              <p className="text-gray-400 text-sm">
-                All the games you create will appear here.
-              </p>
-            </div>
-          ) : myLoading ? (
-            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[...Array(3)].map((_, i) => (
-                <div
-                  key={i}
-                  className="h-52 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse"
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-8">
-              {/* Drafts section */}
-              {drafts.length > 0 && (
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-                    Drafts ({drafts.length})
-                  </h3>
-                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {drafts.map((draft) => (
-                      <div
-                        key={draft.id}
-                        className="flex flex-col gap-3 p-4 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="text-2xl">{draft.emoji}</span>
-                            <div>
-                              <p className="font-bold text-gray-800 dark:text-gray-200 text-sm leading-tight">
-                                {draft.title}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                {new Date(draft.updatedAt).toLocaleDateString()}
-                              </p>
-                            </div>
-                          </div>
-                          <span className="text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded-full font-medium shrink-0">
-                            draft
-                          </span>
-                        </div>
-                        <div className="flex gap-2 mt-auto">
-                          <button
-                            onClick={() =>
-                              router.push(
-                                `/template/${draft.templateId}?draft=${draft.id}`
-                              )
-                            }
-                            className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold py-2 rounded-xl transition-colors"
-                          >
-                            Continue editing →
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDraft(draft.id)}
-                            disabled={deletingDraft === draft.id}
-                            className="text-xs text-gray-400 hover:text-red-500 px-2 py-2 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-40"
-                          >
-                            {deletingDraft === draft.id ? "..." : "🗑"}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+        <p className="mt-6 max-w-xl text-center text-base leading-relaxed text-slate-300 md:text-lg">
+          Describe a game. AI builds it in 60 seconds. Friends remix it.
+          The good ones get played thousands of times.
+        </p>
 
-              {/* Published games */}
-              {myWidgets.length === 0 && drafts.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
-                  <p className="text-5xl">🎮</p>
-                  <h3 className="text-xl font-bold text-gray-800 dark:text-white">
-                    No games yet
-                  </h3>
-                  <p className="text-gray-400 text-sm">
-                    Create your first game and it'll show up here!
-                  </p>
-                  <button
-                    onClick={() => setShowCreate(true)}
-                    className="bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold px-5 py-2.5 rounded-xl"
-                  >
-                    ✨ Create a Game
-                  </button>
-                </div>
-              ) : (
-                myWidgets.length > 0 && (
-                  <div>
-                    {drafts.length > 0 && (
-                      <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-                        Published ({myWidgets.length})
-                      </h3>
-                    )}
-                    <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {myWidgets.map((widget) => (
-                        <WidgetCard
-                          key={widget.id}
-                          widget={widget}
-                          onPlay={(w) => router.push(`/play/${w.id}`)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )
+        {status === 'success' ? (
+          <div className="mt-12 max-w-md rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center">
+            <div className="text-4xl">🎉</div>
+            <h2 className="mt-3 text-xl font-semibold">You&rsquo;re in.</h2>
+            <p className="mt-2 text-sm text-slate-300">
+              We&rsquo;ll email you the moment doors open.
+              {count !== null && (
+                <>
+                  <br />
+                  You&rsquo;re #{count} on the list.
+                </>
               )}
-            </div>
-          )
-        ) : loading ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className="h-52 rounded-2xl bg-gray-100 dark:bg-gray-800 animate-pulse"
-              />
-            ))}
+            </p>
           </div>
         ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sorted.map((widget) => (
-              <WidgetCard
-                key={widget.id}
-                widget={widget}
-                onPlay={(w) => router.push(`/play/${w.id}`)}
-              />
-            ))}
-          </div>
+          <form onSubmit={onSubmit} className="mt-12 flex w-full max-w-md flex-col gap-3 sm:flex-row">
+            <input
+              type="email"
+              required
+              autoFocus
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@somewhere.com"
+              disabled={status === 'submitting'}
+              className="flex-1 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-base outline-none placeholder:text-slate-500 focus:border-purple-400 focus:ring-2 focus:ring-purple-400/30 disabled:opacity-60"
+            />
+            <button
+              type="submit"
+              disabled={status === 'submitting' || !email.trim()}
+              className="rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 px-5 py-3 text-base font-semibold shadow-lg shadow-purple-500/20 transition-all hover:from-purple-400 hover:to-pink-400 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {status === 'submitting' ? 'Adding…' : 'Get early access'}
+            </button>
+          </form>
         )}
 
-        {/* Bottom CTA */}
-        {!loading && (
-          <div className="mt-16 rounded-3xl bg-gradient-to-br from-purple-600 to-pink-600 p-10 text-center text-white shadow-xl">
-            <p className="text-4xl mb-3">🎮</p>
-            <h3 className="text-2xl font-black mb-2">
-              Build your own game. Free.
-            </h3>
-            <p className="text-purple-100 mb-6 max-w-md mx-auto">
-              Describe any game, AI builds it in seconds. Share it, get votes,
-              see it climb the charts.
-            </p>
-            <div className="flex items-center justify-center gap-3 flex-wrap">
-              <button
-                onClick={() => { trackCTAClick({ cta_text: 'Create a Game', cta_location: 'bottom_cta' }); setShowCreate(true); }}
-                className="bg-white text-purple-700 hover:bg-purple-50 font-bold px-7 py-3 rounded-xl shadow-md transition-all"
-              >
-                ✨ Create a Game
+        {error && status === 'error' && (
+          <p className="mt-3 text-sm text-rose-400">{error}</p>
+        )}
+
+        <ul className="mt-16 grid max-w-2xl grid-cols-1 gap-4 text-sm md:grid-cols-3">
+          <Feature
+            icon="🏎️"
+            title="Math Quiz Racer"
+            body="Get the answer right, your car flies. Wrong, you stall. The first game we&rsquo;re shipping."
+          />
+          <Feature
+            icon="✨"
+            title="Build in 60 seconds"
+            body="Describe what you want. AI writes the code. You hit play."
+          />
+          <Feature
+            icon="💸"
+            title="Earn from hits"
+            body="When players love your game, you get paid. Coming after launch."
+          />
+        </ul>
+
+        <p className="mt-16 text-center text-xs text-slate-500">
+          ineedadistraction · cooking · don&rsquo;t tell everyone yet
+        </p>
+
+        {/* Discreet admin sign-in — just a small link, doesn't compete with the
+            email CTA. Admins go through here, get redirected to /dashboard. */}
+        <div className="mt-4 text-center text-[11px] text-slate-600">
+          {isLoaded && !isSignedIn && (
+            <SignInButton mode="modal">
+              <button className="underline-offset-2 hover:text-slate-300 hover:underline">
+                team sign in
               </button>
-              {!isSignedIn && (
-                <SignInButton mode="redirect">
-                  <button className="bg-white/20 hover:bg-white/30 text-white font-bold px-7 py-3 rounded-xl transition-all border border-white/30">
-                    Create Free Account
-                  </button>
-                </SignInButton>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-
-      {showCreate && <CreateModal onClose={() => setShowCreate(false)} />}
-    </div>
-  );
+            </SignInButton>
+          )}
+          {isLoaded && isSignedIn && user && !isAdmin(user.id) && (
+            <span>
+              signed in as {user.primaryEmailAddress?.emailAddress ?? user.id} · check console for your user ID
+            </span>
+          )}
+        </div>
+      </div>
+    </main>
+  )
 }
 
-export default function Home() {
+function Feature({ icon, title, body }: { icon: string; title: string; body: string }) {
   return (
-    <Suspense>
-      <HomeContent />
-    </Suspense>
-  );
+    <li className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+      <div className="text-2xl">{icon}</div>
+      <div className="mt-2 font-semibold">{title}</div>
+      <div className="mt-1 text-xs leading-relaxed text-slate-400">{body}</div>
+    </li>
+  )
+}
+
+// Decorative — subtle floating "game tiles" in the background suggesting
+// the platform's vibe without revealing actual game content.
+function FloatingTiles() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (!mounted) return null
+  const tiles = [
+    { left: '8%', top: '14%', size: 56, delay: 0, hue: 'from-purple-500/20 to-pink-500/10' },
+    { left: '85%', top: '18%', size: 72, delay: 1.2, hue: 'from-orange-500/20 to-pink-500/10' },
+    { left: '12%', top: '72%', size: 48, delay: 0.6, hue: 'from-blue-500/20 to-purple-500/10' },
+    { left: '78%', top: '78%', size: 64, delay: 1.8, hue: 'from-pink-500/20 to-orange-500/10' },
+    { left: '50%', top: '8%', size: 40, delay: 2.4, hue: 'from-emerald-500/20 to-blue-500/10' },
+    { left: '92%', top: '50%', size: 36, delay: 3.0, hue: 'from-pink-500/20 to-purple-500/10' },
+  ]
+  return (
+    <div ref={ref} aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+      {tiles.map((t, i) => (
+        <div
+          key={i}
+          className={`absolute rounded-2xl bg-gradient-to-br ${t.hue} animate-float blur-[2px]`}
+          style={{
+            left: t.left,
+            top: t.top,
+            width: t.size,
+            height: t.size,
+            animationDelay: `${t.delay}s`,
+          }}
+        />
+      ))}
+      <style jsx>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0) rotate(-3deg); }
+          50% { transform: translateY(-14px) rotate(3deg); }
+        }
+        :global(.animate-float) {
+          animation: float 7s ease-in-out infinite;
+        }
+      `}</style>
+    </div>
+  )
 }
