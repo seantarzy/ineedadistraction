@@ -3,6 +3,7 @@
 import { use, useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
+import { isAdmin } from '../../lib/admin';
 import type { Widget } from '../../lib/store';
 import BrainTeaser from '../../components/BrainTeaser';
 import MemoryGame from '../../components/MemoryGame';
@@ -134,6 +135,9 @@ function PlayPageInner({ id }: { id: string }) {
   // in place rather than creating a remix. widget.userId is the original
   // author's Clerk user ID.
   const isAuthor = !!(isSignedIn && user && widget.userId && widget.userId === user.id);
+  // Non-admins can play and share, but Remix funnels them to the waitlist
+  // (with remix-flavored copy) since the create flow is alpha-gated.
+  const remixHref = isAdmin(user?.id) ? `/template/${widget.id}` : '/?source=remix';
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
@@ -187,7 +191,7 @@ function PlayPageInner({ id }: { id: string }) {
           ) : (
             canRemix && (
               <button
-                onClick={() => router.push(`/template/${widget.id}`)}
+                onClick={() => router.push(remixHref)}
                 className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white px-3 py-1.5 rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all"
               >
                 ✨ Remix

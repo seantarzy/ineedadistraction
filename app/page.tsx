@@ -1,14 +1,23 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { Suspense, useEffect, useRef, useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth, useUser, SignInButton } from '@clerk/nextjs'
 import { isAdmin } from './lib/admin'
 
 type Status = 'idle' | 'submitting' | 'success' | 'error'
 
 export default function WaitlistPage() {
+  return (
+    <Suspense>
+      <WaitlistInner />
+    </Suspense>
+  )
+}
+
+function WaitlistInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { isSignedIn, isLoaded } = useAuth()
   const { user } = useUser()
   const [email, setEmail] = useState('')
@@ -16,21 +25,15 @@ export default function WaitlistPage() {
   const [error, setError] = useState('')
   const [count, setCount] = useState<number | null>(null)
 
+  // ?source=remix means the visitor clicked Remix on a shared game and got
+  // funneled here because they're not on the alpha. Show a remix-flavored pitch.
+  const source = searchParams.get('source')
+  const isRemixSource = source === 'remix'
+
   // Admin bypass — signed-in admins skip the waitlist and land on the real app.
-  // Non-admin signed-in users see their Clerk user ID logged so the site owner
-  // can paste it into lib/admin.ts to grant themselves access.
   useEffect(() => {
     if (!isLoaded || !isSignedIn || !user) return
-    if (isAdmin(user.id)) {
-      router.replace('/dashboard')
-    } else {
-      // Print to console so first-time setup is one copy/paste:
-      // open devtools, sign in, grab the ID, paste into app/lib/admin.ts.
-      console.log(
-        `[ineedadistraction] Signed in but not admin. Your Clerk user ID:\n  ${user.id}\n` +
-          `Add it to app/lib/admin.ts → ADMIN_CLERK_IDS to bypass the waitlist.`
-      )
-    }
+    if (isAdmin(user.id)) router.replace('/dashboard')
   }, [isLoaded, isSignedIn, user, router])
 
   async function onSubmit(e: React.FormEvent) {
@@ -42,7 +45,7 @@ export default function WaitlistPage() {
       const res = await fetch('/api/waitlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), source: 'home' }),
+        body: JSON.stringify({ email: email.trim(), source: source || 'home' }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -64,21 +67,40 @@ export default function WaitlistPage() {
       <div className="relative z-10 mx-auto flex min-h-dvh max-w-3xl flex-col items-center justify-center px-6 py-16">
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-purple-500/30 bg-purple-500/10 px-3 py-1 text-xs font-medium uppercase tracking-widest text-purple-300">
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-purple-400" />
-          early access · spring &rsquo;26
+          {isRemixSource ? 'remixing opens spring ’26' : 'early access · spring ’26'}
         </div>
 
-        <h1 className="text-center text-5xl font-extrabold tracking-tight md:text-7xl">
-          The AI playground
-          <br />
-          <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-orange-300 bg-clip-text text-transparent">
-            for games that don&rsquo;t exist yet.
-          </span>
-        </h1>
+        {isRemixSource ? (
+          <>
+            <h1 className="text-center text-5xl font-extrabold tracking-tight md:text-7xl">
+              You can remix this.
+              <br />
+              <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-orange-300 bg-clip-text text-transparent">
+                Just not quite yet.
+              </span>
+            </h1>
 
-        <p className="mt-6 max-w-xl text-center text-base leading-relaxed text-slate-300 md:text-lg">
-          Describe a game. AI builds it in 60 seconds. Friends remix it.
-          The good ones get played thousands of times.
-        </p>
+            <p className="mt-6 max-w-xl text-center text-base leading-relaxed text-slate-300 md:text-lg">
+              Drop your email and we&rsquo;ll let you in the moment doors open.
+              Remix any game, publish your spin, and earn when players love it.
+            </p>
+          </>
+        ) : (
+          <>
+            <h1 className="text-center text-5xl font-extrabold tracking-tight md:text-7xl">
+              The AI playground
+              <br />
+              <span className="bg-gradient-to-r from-purple-400 via-pink-400 to-orange-300 bg-clip-text text-transparent">
+                for games that don&rsquo;t exist yet.
+              </span>
+            </h1>
+
+            <p className="mt-6 max-w-xl text-center text-base leading-relaxed text-slate-300 md:text-lg">
+              Describe a game. AI builds it in 60 seconds. Friends remix it.
+              The good ones get played thousands of times.
+            </p>
+          </>
+        )}
 
         {status === 'success' ? (
           <div className="mt-12 max-w-md rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-6 text-center">
@@ -151,11 +173,6 @@ export default function WaitlistPage() {
                 team sign in
               </button>
             </SignInButton>
-          )}
-          {isLoaded && isSignedIn && user && !isAdmin(user.id) && (
-            <span>
-              signed in as {user.primaryEmailAddress?.emailAddress ?? user.id} · check console for your user ID
-            </span>
           )}
         </div>
       </div>
