@@ -156,35 +156,56 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
       .catch(() => setSourceLoading(false));
   }, [id, template]);
 
-  // Initial load: draft (if ?draft= present) or seed with template HTML
+  // Initial load: draft (if ?draft= present) or seed with template HTML.
+  // Edit mode auto-resumes any existing draft for this widget so re-entering
+  // edit doesn't keep creating fresh dupe drafts.
   useEffect(() => {
     if (!source) return;
-    const draftId = searchParams.get('draft');
-    if (draftId) {
-      fetch(`/api/drafts/${draftId}`, { headers: ownerHeaders() })
-        .then((r) => r.ok ? r.json() : null)
-        .then((draft) => {
-          if (draft) {
-            setCurrentHtml(draft.html);
-            if (draft.title && draft.title !== 'Untitled Draft') setGameTitle(draft.title);
-            if (draft.description) setHowToPlay(draft.description);
-            return fetch(`/api/drafts/${draftId}/messages`, { headers: ownerHeaders() });
-          }
-          if (template) setCurrentHtml(source.html);
-        })
-        .then((r) => r?.ok ? r.json() : null)
-        .then((msgs) => {
-          if (Array.isArray(msgs)) {
-            setMessages(msgs);
-            // Derive actual iteration count from persisted generation receipts
-            const priorGens = msgs.filter((m: Message) => m.kind === 'generate_result').length;
-            setRemixCount(priorGens);
-          }
-        });
-    } else if (template) {
-      setCurrentHtml(source.html);
+    const explicitDraftId = searchParams.get('draft');
+
+    async function loadDraft(draftId: string) {
+      const dr = await fetch(`/api/drafts/${draftId}`, { headers: ownerHeaders() });
+      if (!dr.ok) {
+        if (template) setCurrentHtml(source!.html);
+        return;
+      }
+      const draft = await dr.json();
+      draftIdRef.current = draft.id;
+      setCurrentHtml(draft.html);
+      if (draft.title && draft.title !== 'Untitled Draft') setGameTitle(draft.title);
+      if (draft.description) setHowToPlay(draft.description);
+      const mr = await fetch(`/api/drafts/${draftId}/messages`, { headers: ownerHeaders() });
+      if (mr.ok) {
+        const msgs = await mr.json();
+        if (Array.isArray(msgs)) {
+          setMessages(msgs);
+          setRemixCount(msgs.filter((m: Message) => m.kind === 'generate_result').length);
+        }
+      }
     }
-    setBlockedByLimit(!isSignedIn && hasUsedCreation());
+
+    (async () => {
+      if (explicitDraftId) {
+        await loadDraft(explicitDraftId);
+      } else if (isEditMode) {
+        // Find existing draft for this widget so we resume instead of duping.
+        const r = await fetch(`/api/drafts?templateId=${encodeURIComponent(id)}`, { headers: ownerHeaders() });
+        const drafts = r.ok ? await r.json() : [];
+        if (Array.isArray(drafts) && drafts.length > 0) {
+          // Most-recent first (server orders desc). Pin URL so refresh stays put.
+          const existing = drafts[0];
+          const url = new URL(window.location.href);
+          url.searchParams.set('draft', existing.id);
+          window.history.replaceState({}, '', url.toString());
+          await loadDraft(existing.id);
+        } else if (template) {
+          setCurrentHtml(source.html);
+        }
+      } else if (template) {
+        setCurrentHtml(source.html);
+      }
+      setBlockedByLimit(!isSignedIn && hasUsedCreation());
+    })();
   }, [source, isSignedIn]);
 
   // Auto-scroll the thread to bottom when new messages arrive
@@ -602,6 +623,22 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
     setRemixCount((n) => Math.max(0, n - 1));
   }
 
+  async function handleUnpublish() {
+    if (!isEditMode || !isSignedIn) return;
+    if (!confirm(`Take "${source!.title}" off the market? Players won't be able to find or remix it anymore. This can't be undone.`)) return;
+    try {
+      const res = await fetch(`/api/widgets/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to unpublish');
+      if (draftIdRef.current) {
+        await fetch(`/api/drafts/${draftIdRef.current}`, { method: 'DELETE', headers: ownerHeaders() }).catch(() => {});
+        draftIdRef.current = null;
+      }
+      router.push('/dashboard');
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : 'Failed to unpublish');
+    }
+  }
+
   async function handlePublish() {
     if (!gameTitle.trim()) return;
     trackCTAClick({ cta_text: isEditMode ? 'Save Edit' : 'Publish', cta_location: 'template_page', cta_destination: isEditMode ? 'edit_save' : 'publish' });
@@ -622,6 +659,12 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
+        // Edit committed back to the widget — drop the WIP draft so the
+        // dashboard doesn't keep showing a stale "Continue editing" card.
+        if (draftIdRef.current) {
+          fetch(`/api/drafts/${draftIdRef.current}`, { method: 'DELETE', headers: ownerHeaders() }).catch(() => {});
+          draftIdRef.current = null;
+        }
         router.push(`/play/${id}`);
       } catch (err) {
         setEmailError(err instanceof Error ? err.message : 'Failed to save changes');
@@ -695,10 +738,13 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         <div className="flex items-center gap-2">
           <span className="text-lg">{source.emoji}</span>
           <span className="font-bold">{source.title}</span>
-          {hasRemixed && (
+          {isEditMode ? (
+            <span className="text-xs bg-amber-600/30 text-amber-200 border border-amber-500/40 px-2 py-0.5 rounded-full font-semibold">
+              ✏️ Editing published
+            </span>
+          ) : hasRemixed ? (
             <span className="text-xs bg-purple-800/60 text-purple-300 px-2 py-0.5 rounded-full">remix v{remixCount}</span>
-          )}
-          {!hasRemixed && (
+          ) : (
             <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">{template ? 'basic game' : 'original'}</span>
           )}
         </div>
@@ -932,6 +978,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                   isEditMode={isEditMode}
                   onPublish={handlePublish}
                   onCancel={() => setShowPublish(false)}
+                  onUnpublish={isEditMode && isSignedIn ? handleUnpublish : undefined}
                 />
               )}
             </div>
@@ -1198,6 +1245,7 @@ function PublishForm(props: {
   isSignedIn: boolean;
   isEditMode?: boolean;
   onPublish: () => void; onCancel: () => void;
+  onUnpublish?: () => void;
 }) {
   return (
     <div className="flex flex-col gap-3">
@@ -1248,6 +1296,14 @@ function PublishForm(props: {
       <button onClick={props.onCancel} className="text-xs text-gray-600 hover:text-gray-400 text-center">
         ← {props.isEditMode ? 'Keep editing' : 'Keep remixing'}
       </button>
+      {props.onUnpublish && (
+        <button
+          onClick={props.onUnpublish}
+          className="mt-1 text-xs text-red-500/80 hover:text-red-400 text-center underline-offset-2 hover:underline"
+        >
+          Unpublish this game
+        </button>
+      )}
     </div>
   );
 }

@@ -106,6 +106,15 @@ export async function updateWidget(
   return toWidget(row);
 }
 
+// Author-only delete — used to "unpublish" a game. Vote rows cascade via Prisma.
+export async function deleteWidget(id: string, authorClerkUserId: string): Promise<boolean> {
+  const existing = await prisma.widget.findUnique({ where: { id } });
+  if (!existing) return false;
+  if (existing.userId !== authorClerkUserId) return false;
+  await prisma.widget.delete({ where: { id } });
+  return true;
+}
+
 export async function voteWidget(id: string, voterId: string): Promise<Widget | null> {
   // Idempotent: only count the vote if this voter hasn't already voted.
   try {

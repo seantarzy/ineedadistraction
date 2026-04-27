@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { getWidget, updateWidget } from '@/app/lib/store';
+import { deleteWidget, getWidget, updateWidget } from '@/app/lib/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,4 +34,14 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: 'Not found or not the author' }, { status: 404 });
   }
   return NextResponse.json(updated);
+}
+
+// DELETE — author unpublishes / takes the game off the market.
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const ok = await deleteWidget(id, userId);
+  if (!ok) return NextResponse.json({ error: 'Not found or not the author' }, { status: 404 });
+  return NextResponse.json({ ok: true });
 }

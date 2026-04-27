@@ -7,7 +7,9 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: Request) {
   const owner = await resolveOwner(req);
   if (!owner) return NextResponse.json([]);
-  return NextResponse.json(await getDraftsByOwner(owner));
+  const all = await getDraftsByOwner(owner);
+  const templateId = new URL(req.url).searchParams.get('templateId');
+  return NextResponse.json(templateId ? all.filter((d) => d.templateId === templateId) : all);
 }
 
 export async function POST(req: Request) {
