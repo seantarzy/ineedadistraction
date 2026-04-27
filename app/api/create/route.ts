@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { compactHtml } from '@/app/lib/htmlCompact';
+import { compactHtml, extractHtmlDocument } from '@/app/lib/htmlCompact';
 
 // Pro plan caps maxDuration; Hobby silently clamps to 60. 90s gives Pro headroom.
 export const maxDuration = 90;
@@ -175,9 +175,10 @@ async function generateGame(userMessage: string): Promise<string> {
   const content = message.content[0];
   if (content.type !== 'text') throw new Error('Unexpected response type');
 
-  let html = content.text.trim();
-  const fenced = html.match(/```(?:html)?\n?([\s\S]*?)```/);
-  if (fenced) html = fenced[1].trim();
+  // Defensive extraction — strips fences, pre-doctype preambles, and post-</html>
+  // trailing text. Without this, model reasoning preambles get rendered as
+  // visible content inside the iframe.
+  let html = extractHtmlDocument(content.text);
 
   // Belt-and-suspenders: every complete game must end with </html>.
   if (!html.trimEnd().toLowerCase().endsWith('</html>')) throw new TruncatedOutputError();

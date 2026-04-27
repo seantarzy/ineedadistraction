@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
-import { compactHtml } from '@/app/lib/htmlCompact';
+import { compactHtml, extractHtmlDocument } from '@/app/lib/htmlCompact';
 
 const client = new Anthropic();
 
@@ -129,9 +129,10 @@ Modify the HTML above to implement ONLY the current step. Return the complete mo
     const content = message.content[0];
     if (content.type !== 'text') throw new Error('Unexpected response type');
 
-    let html = content.text.trim();
-    const fenced = html.match(/```(?:html)?\n?([\s\S]*?)```/);
-    if (fenced) html = fenced[1].trim();
+    // Defensive extraction — strips fences, pre-doctype preambles, and post-</html>
+    // trailing text. Without this, model reasoning preambles get rendered as
+    // visible content inside the iframe.
+    let html = extractHtmlDocument(content.text);
 
     if (!html.trimEnd().toLowerCase().endsWith('</html>')) throw new TruncatedOutputError();
     if (!html.includes('<html') && !html.includes('<!DOCTYPE')) {

@@ -42,3 +42,31 @@ export function compactHtml(html: string): string {
 
   return s.trim();
 }
+
+/**
+ * Pull a clean HTML document out of a model response. The system prompts ask
+ * for HTML-only output, but Claude occasionally emits a reasoning preamble or
+ * trailing commentary anyway. Browsers render text-before-doctype as visible
+ * page content (we saw this leak the model's reasoning into a live widget),
+ * so this defends against it:
+ *
+ *   1. If a fenced ```html block exists, prefer its inner content.
+ *   2. Trim everything before <!DOCTYPE> or <html> (handles preambles).
+ *   3. Trim everything after </html> (handles trailing commentary).
+ */
+export function extractHtmlDocument(raw: string): string {
+  let html = raw.trim();
+
+  const fenced = html.match(/```(?:html)?\n?([\s\S]*?)```/);
+  if (fenced) html = fenced[1].trim();
+
+  const docStart = html.search(/<!DOCTYPE\s|<html\b/i);
+  if (docStart > 0) html = html.slice(docStart);
+
+  const closeMatch = html.match(/<\/html\s*>/i);
+  if (closeMatch && typeof closeMatch.index === 'number') {
+    html = html.slice(0, closeMatch.index + closeMatch[0].length);
+  }
+
+  return html.trim();
+}
