@@ -65,12 +65,17 @@ async function callSonnetWithRetry(userMessage: string) {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
-      return await client.messages.create({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 24000,
-        messages: [{ role: 'user', content: userMessage }],
-        system: STEP_SYSTEM_PROMPT,
-      });
+      // Stream under the hood — non-streaming requests with max_tokens this
+      // high get rejected by the SDK as potentially exceeding 10 min. The
+      // returned Message has the same shape (.content, .stop_reason, .usage).
+      return await client.messages
+        .stream({
+          model: 'claude-sonnet-4-6',
+          max_tokens: 24000,
+          messages: [{ role: 'user', content: userMessage }],
+          system: STEP_SYSTEM_PROMPT,
+        })
+        .finalMessage();
     } catch (err) {
       lastErr = err;
       if (isCreditExhausted(err)) throw new CreditExhaustedError();
