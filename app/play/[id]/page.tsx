@@ -2,6 +2,7 @@
 
 import { use, useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useAuth, useUser } from '@clerk/nextjs';
 import type { Widget } from '../../lib/store';
 import BrainTeaser from '../../components/BrainTeaser';
 import MemoryGame from '../../components/MemoryGame';
@@ -57,6 +58,8 @@ function PlayPageInner({ id }: { id: string }) {
   const router = useRouter();
   const params = useSearchParams();
   const isNew = params.get('new') === '1';
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
 
   const [widget, setWidget] = useState<Widget | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -127,6 +130,10 @@ function PlayPageInner({ id }: { id: string }) {
   }
 
   const canRemix = widget.html && widget.remixable !== false;
+  // Author of this widget? They get an Edit button that updates the widget
+  // in place rather than creating a remix. widget.userId is the original
+  // author's Clerk user ID.
+  const isAuthor = !!(isSignedIn && user && widget.userId && widget.userId === user.id);
 
   return (
     <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
@@ -169,13 +176,23 @@ function PlayPageInner({ id }: { id: string }) {
           >
             {copied ? 'Copied!' : '🔗'}
           </button>
-          {canRemix && (
+          {isAuthor ? (
             <button
-              onClick={() => router.push(`/template/${widget.id}`)}
-              className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white px-3 py-1.5 rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all"
+              onClick={() => router.push(`/template/${widget.id}?edit=1`)}
+              title="You created this — edit it directly"
+              className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-3 py-1.5 rounded-lg hover:from-emerald-700 hover:to-teal-700 transition-all"
             >
-              ✨ Remix
+              ✏️ Edit
             </button>
+          ) : (
+            canRemix && (
+              <button
+                onClick={() => router.push(`/template/${widget.id}`)}
+                className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white px-3 py-1.5 rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all"
+              >
+                ✨ Remix
+              </button>
+            )
           )}
         </div>
       </header>

@@ -80,6 +80,32 @@ export async function addWidget(
   return toWidget(row);
 }
 
+/**
+ * Update a widget. Only the original author can update — pass their Clerk
+ * userId; if it doesn't match the stored userId, returns null without touching
+ * the row. Allowed fields: title, description, emoji, html, remixable.
+ */
+export async function updateWidget(
+  id: string,
+  authorClerkUserId: string,
+  updates: { title?: string; description?: string; emoji?: string; html?: string; remixable?: boolean },
+): Promise<Widget | null> {
+  const existing = await prisma.widget.findUnique({ where: { id } });
+  if (!existing) return null;
+  if (existing.userId !== authorClerkUserId) return null;
+  const row = await prisma.widget.update({
+    where: { id },
+    data: {
+      ...(updates.title !== undefined && { title: updates.title }),
+      ...(updates.description !== undefined && { description: updates.description }),
+      ...(updates.emoji !== undefined && { emoji: updates.emoji }),
+      ...(updates.html !== undefined && { html: updates.html }),
+      ...(updates.remixable !== undefined && { remixable: updates.remixable }),
+    },
+  });
+  return toWidget(row);
+}
+
 export async function voteWidget(id: string, voterId: string): Promise<Widget | null> {
   // Idempotent: only count the vote if this voter hasn't already voted.
   try {

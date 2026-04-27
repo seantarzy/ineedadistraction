@@ -110,6 +110,10 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
   const [blockedByLimit, setBlockedByLimit] = useState(false);
 
   const draftIdRef = useRef<string | null>(searchParams.get('draft'));
+  // Author edit mode: ?edit=1 means publish writes back to the existing widget
+  // (PATCH) instead of creating a new remix (POST). Source-loading and the
+  // publish form are tweaked accordingly. Server-side enforces author-only.
+  const isEditMode = searchParams.get('edit') === '1';
   const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [genReasoningIdx, setGenReasoningIdx] = useState(0);
   const [genElapsed, setGenElapsed] = useState(0);
@@ -129,9 +133,23 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
     fetch(`/api/widgets/${id}`)
       .then((r) => r.ok ? r.json() : null)
       .then((widget) => {
-        if (widget && widget.html && widget.remixable !== false) {
-          setSource({ title: widget.title, emoji: widget.emoji || '🎮', html: widget.html, remixHint: `Remix "${widget.title}" — describe what you want to change`, id: widget.id });
+        // In edit mode, load the widget regardless of remixable so the author
+        // can always update their own. For remixers, respect remixable.
+        if (widget && widget.html && (isEditMode || widget.remixable !== false)) {
+          setSource({
+            title: widget.title,
+            emoji: widget.emoji || '🎮',
+            html: widget.html,
+            remixHint: isEditMode
+              ? `Editing "${widget.title}" — describe what you want to change`
+              : `Remix "${widget.title}" — describe what you want to change`,
+            id: widget.id,
+          });
           setCurrentHtml(widget.html);
+          if (isEditMode) {
+            setGameTitle(widget.title);
+            setHowToPlay(widget.description ?? '');
+          }
         }
         setSourceLoading(false);
       })
@@ -586,8 +604,30 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
 
   async function handlePublish() {
     if (!gameTitle.trim()) return;
-    trackCTAClick({ cta_text: 'Publish', cta_location: 'template_page', cta_destination: 'publish' });
+    trackCTAClick({ cta_text: isEditMode ? 'Save Edit' : 'Publish', cta_location: 'template_page', cta_destination: isEditMode ? 'edit_save' : 'publish' });
     setEmailError('');
+
+    // Author edit-mode → PATCH the existing widget instead of creating a new one.
+    if (isEditMode && isSignedIn) {
+      try {
+        const res = await fetch(`/api/widgets/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: gameTitle.trim(),
+            description: howToPlay.trim() || source!.title,
+            html: currentHtml,
+            remixable: allowRemixes,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        router.push(`/play/${id}`);
+      } catch (err) {
+        setEmailError(err instanceof Error ? err.message : 'Failed to save changes');
+      }
+      return;
+    }
 
     if (isSignedIn) {
       try {
@@ -859,9 +899,11 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             )
           )}
 
-          {/* Undo + Publish */}
+          {/* Undo + Publish — separated from chat input by a thicker divider
+              and extra padding so the publish CTA can't be accidentally hit
+              when finishing a chat message. */}
           {hasRemixed && publishStep !== 'sent' && (
-            <div className="shrink-0 border-t border-gray-800 p-3 flex flex-col gap-2">
+            <div className="shrink-0 border-t-4 border-gray-800 bg-gray-900/40 px-3 pt-4 pb-3 flex flex-col gap-2">
               {history.length > 0 && (
                 <button
                   onClick={handleUndo}
@@ -878,7 +920,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                   disabled={isBusy}
                   className="w-full bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-200 font-semibold py-2.5 rounded-xl transition-all text-sm border border-gray-700"
                 >
-                  🚀 Publish this version
+                  {isEditMode ? '💾 Save changes' : '🚀 Publish this version'}
                 </button>
               ) : (
                 <PublishForm
@@ -887,6 +929,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                   email={email} setEmail={setEmail} emailError={emailError}
                   allowRemixes={allowRemixes} setAllowRemixes={setAllowRemixes}
                   isSignedIn={!!isSignedIn}
+                  isEditMode={isEditMode}
                   onPublish={handlePublish}
                   onCancel={() => setShowPublish(false)}
                 />
@@ -1153,11 +1196,14 @@ function PublishForm(props: {
   email: string; setEmail: (v: string) => void; emailError: string;
   allowRemixes: boolean; setAllowRemixes: (v: boolean) => void;
   isSignedIn: boolean;
+  isEditMode?: boolean;
   onPublish: () => void; onCancel: () => void;
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">Publish</p>
+      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">
+        {props.isEditMode ? 'Save changes' : 'Publish'}
+      </p>
       <input
         className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
         placeholder="Game title"
@@ -1197,10 +1243,10 @@ function PublishForm(props: {
         disabled={!props.gameTitle.trim() || (!props.isSignedIn && !props.email.trim())}
         className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 text-white font-bold py-2.5 rounded-xl transition-all text-sm"
       >
-        {props.isSignedIn ? '🚀 Publish Now' : 'Send Magic Link →'}
+        {props.isEditMode ? '💾 Save Changes' : props.isSignedIn ? '🚀 Publish Now' : 'Send Magic Link →'}
       </button>
       <button onClick={props.onCancel} className="text-xs text-gray-600 hover:text-gray-400 text-center">
-        ← Keep remixing
+        ← {props.isEditMode ? 'Keep editing' : 'Keep remixing'}
       </button>
     </div>
   );
