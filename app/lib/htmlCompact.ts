@@ -52,7 +52,11 @@ export function compactHtml(html: string): string {
  *
  *   1. If a fenced ```html block exists, prefer its inner content.
  *   2. Trim everything before <!DOCTYPE> or <html> (handles preambles).
- *   3. Trim everything after </html> (handles trailing commentary).
+ *   3. Trim everything after the LAST </html> (handles trailing commentary).
+ *
+ * The "last </html>" matters: a game may have JS string literals containing
+ * "</html>" (e.g. innerHTML templates). Cutting at the first match would
+ * truncate the real document and trigger a false TruncatedOutputError.
  */
 export function extractHtmlDocument(raw: string): string {
   let html = raw.trim();
@@ -63,9 +67,12 @@ export function extractHtmlDocument(raw: string): string {
   const docStart = html.search(/<!DOCTYPE\s|<html\b/i);
   if (docStart > 0) html = html.slice(docStart);
 
-  const closeMatch = html.match(/<\/html\s*>/i);
-  if (closeMatch && typeof closeMatch.index === 'number') {
-    html = html.slice(0, closeMatch.index + closeMatch[0].length);
+  // Find the LAST </html> close tag — model code may legitimately contain
+  // earlier "</html>" strings inside JS templates / innerHTML assignments.
+  const closeMatches = [...html.matchAll(/<\/html\s*>/gi)];
+  const last = closeMatches[closeMatches.length - 1];
+  if (last && typeof last.index === 'number') {
+    html = html.slice(0, last.index + last[0].length);
   }
 
   return html.trim();
