@@ -219,7 +219,16 @@ function HomeContent() {
                     Drafts ({drafts.length})
                   </h3>
                   <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {drafts.map((draft) => (
+                    {drafts.map((draft) => {
+                      // Drafts whose templateId matches one of your published widgets
+                      // are edit-mode sessions, not standalone remixes — resume in
+                      // edit mode so save commits back to the widget instead of
+                      // creating a new one.
+                      const isEditDraft = myWidgets.some((w) => w.id === draft.templateId);
+                      const continueUrl = isEditDraft
+                        ? `/template/${draft.templateId}?edit=1&draft=${draft.id}`
+                        : `/template/${draft.templateId}?draft=${draft.id}`;
+                      return (
                       <div
                         key={draft.id}
                         className="flex flex-col gap-3 p-4 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/50"
@@ -236,20 +245,20 @@ function HomeContent() {
                               </p>
                             </div>
                           </div>
-                          <span className="text-xs bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400 px-2 py-0.5 rounded-full font-medium shrink-0">
-                            draft
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${
+                            isEditDraft
+                              ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                              : 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                          }`}>
+                            {isEditDraft ? 'editing published' : 'draft'}
                           </span>
                         </div>
                         <div className="flex gap-2 mt-auto">
                           <button
-                            onClick={() =>
-                              router.push(
-                                `/template/${draft.templateId}?draft=${draft.id}`
-                              )
-                            }
+                            onClick={() => router.push(continueUrl)}
                             className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold py-2 rounded-xl transition-colors"
                           >
-                            Continue editing →
+                            {isEditDraft ? 'Resume editing →' : 'Continue editing →'}
                           </button>
                           <button
                             onClick={() => handleDeleteDraft(draft.id)}
@@ -260,7 +269,8 @@ function HomeContent() {
                           </button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}

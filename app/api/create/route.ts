@@ -2,8 +2,9 @@ import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { compactHtml, extractHtmlDocument } from '@/app/lib/htmlCompact';
 
-// Pro plan caps maxDuration; Hobby silently clamps to 60. 90s gives Pro headroom.
-export const maxDuration = 90;
+// Pro plan caps maxDuration; Hobby silently clamps to 60. 300s = headroom for
+// outlier first-generations of complex games; the typical one finishes in 30-60s.
+export const maxDuration = 300;
 
 const client = new Anthropic();
 
@@ -258,6 +259,10 @@ export async function POST(req: Request) {
     ? `Here is an existing browser game (compact form — preserve this style in output):\n\n${compactedBase}\n\n---\n\nRemix this game by adding the following twist while keeping ALL original mechanics intact:\n\n${prompt}${planBlock}\n\nReturn the complete modified HTML document in the same compact form.`
     : `Create a browser game: ${prompt}${planBlock}`;
 
+  const startedAt = Date.now();
+  let truncationRetried = false;
+  let validationRetried = false;
+
   try {
     // ── First attempt ─────────────────────────────────────────────────────────
     let html: string;
@@ -266,6 +271,7 @@ export async function POST(req: Request) {
     } catch (err) {
       // Retry once on truncation — sometimes Claude just rambles on the first try
       if (err instanceof TruncatedOutputError) {
+        truncationRetried = true;
         const terseRetry = `${userMessage}\n\nIMPORTANT: Keep the code TIGHT. Inline styles, minimal whitespace, no comments. The full document must fit within 16k tokens.`;
         html = await generateGame(terseRetry);
       } else {
@@ -282,6 +288,7 @@ export async function POST(req: Request) {
 
     // ── Retry once if bugs found ──────────────────────────────────────────────
     if (issues.length > 0) {
+      validationRetried = true;
       const retryMessage = `${userMessage}
 
 IMPORTANT: A previous generation attempt had these bugs — fix all of them:
@@ -300,9 +307,31 @@ Generate a corrected, fully working version.`;
     // ── Extract title + how-to-play (runs in parallel with nothing else, fast) ─
     const meta = await extractMeta(html);
 
+    console.log(JSON.stringify({
+      event: 'create_done',
+      isRemix: !!baseHtml,
+      promptBytes: prompt.length,
+      baseHtmlBytes: compactedBase.length,
+      htmlOutBytes: html.length,
+      issueCount: issues.length,
+      truncationRetried,
+      validationRetried,
+      totalMs: Date.now() - startedAt,
+    }));
+
     return NextResponse.json({ html, title: meta.title, description: meta.description });
   } catch (err) {
-    console.error(err);
+    console.error(JSON.stringify({
+      event: 'create_failed',
+      isRemix: !!baseHtml,
+      promptBytes: prompt.length,
+      baseHtmlBytes: compactedBase.length,
+      truncationRetried,
+      validationRetried,
+      elapsedMs: Date.now() - startedAt,
+      errorName: (err as Error)?.name,
+      errorMessage: (err as Error)?.message,
+    }));
     if (err instanceof TruncatedOutputError) {
       return NextResponse.json({ error: 'Your game was too ambitious to fit in one generation — try a simpler prompt or break it into smaller remixes.' }, { status: 500 });
     }

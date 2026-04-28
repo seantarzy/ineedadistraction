@@ -659,12 +659,9 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
-        // Edit committed back to the widget — drop the WIP draft so the
-        // dashboard doesn't keep showing a stale "Continue editing" card.
-        if (draftIdRef.current) {
-          fetch(`/api/drafts/${draftIdRef.current}`, { method: 'DELETE', headers: ownerHeaders() }).catch(() => {});
-          draftIdRef.current = null;
-        }
+        // Keep the draft around — it holds the chat history (Messages live on
+        // Draft). Next edit session resumes it via the templateId lookup so
+        // the user sees the full conversation across sessions.
         router.push(`/play/${id}`);
       } catch (err) {
         setEmailError(err instanceof Error ? err.message : 'Failed to save changes');

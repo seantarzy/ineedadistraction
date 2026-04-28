@@ -5,8 +5,9 @@ import { compactHtml, extractHtmlDocument } from '@/app/lib/htmlCompact';
 const client = new Anthropic();
 
 // Per-step generation. Vercel plan caps this: Hobby silently clamps to 60s,
-// Pro supports up to 800s. 90s gives Pro users headroom for large games.
-export const maxDuration = 90;
+// Pro supports up to 800s. 300s = headroom for outlier steps; the typical
+// step finishes in 30-90s and the chat retry handles real failures.
+export const maxDuration = 300;
 
 const STEP_SYSTEM_PROMPT = `You are implementing ONE step of an approved gameplan for a browser mini-game.
 
@@ -60,7 +61,7 @@ function isCreditExhausted(err: unknown): boolean {
   return msg.toLowerCase().includes('credit balance');
 }
 
-async function callSonnetWithRetry(userMessage: string) {
+async function callSonnetWithRetry(stableUserContent: string, dynamicUserContent: string) {
   const delays = [500, 1500];
   let lastErr: unknown;
   for (let attempt = 0; attempt <= delays.length; attempt++) {
@@ -68,12 +69,26 @@ async function callSonnetWithRetry(userMessage: string) {
       // Stream under the hood — non-streaming requests with max_tokens this
       // high get rejected by the SDK as potentially exceeding 10 min. The
       // returned Message has the same shape (.content, .stop_reason, .usage).
+      //
+      // Caching: the system prompt + the stable user content (plan + steps list)
+      // are marked cache_control: ephemeral. Across the steps of one build,
+      // these prefixes match, so steps 2..N hit the prompt cache (5-min TTL).
+      // Note: caching only triggers if the cached prefix is ≥1024 tokens for
+      // Sonnet; smaller prompts silently no-op the cache_control marker.
       return await client.messages
         .stream({
           model: 'claude-sonnet-4-6',
           max_tokens: 24000,
-          messages: [{ role: 'user', content: userMessage }],
-          system: STEP_SYSTEM_PROMPT,
+          system: [
+            { type: 'text', text: STEP_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+          ],
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: stableUserContent, cache_control: { type: 'ephemeral' } },
+              { type: 'text', text: dynamicUserContent },
+            ],
+          }],
         })
         .finalMessage();
     } catch (err) {
@@ -101,19 +116,26 @@ export async function POST(req: Request) {
   }
 
   const currentStep = allSteps[stepIndex];
-  const numbered = allSteps.map((s: string, i: number) => `${i === stepIndex ? '→' : i < stepIndex ? '✓' : ' '} ${i + 1}. ${s}`).join('\n');
 
   // Compact the HTML — strips comments and collapses whitespace. Saves ~25-35% tokens
   // both in input (cheaper, faster TTFT) and output (Sonnet mirrors compact style).
   const compactedHtml = compactHtml(currentHtml);
 
-  const userMessage = `═══ PLAN ═══
+  // Split the prompt into stable + dynamic parts so the prompt cache can hit
+  // across steps in the same build. Stable = identical for every step of a
+  // given plan (plan summary, plain steps list). Dynamic = changes per step
+  // (which step we're on + the current HTML).
+  const plainSteps = allSteps.map((s: string, i: number) => `${i + 1}. ${s}`).join('\n');
+  const stableUserContent = `═══ PLAN ═══
 ${planSummary || '(no summary)'}
 
-═══ ALL STEPS (→ marks current, ✓ marks already done) ═══
-${numbered}
+═══ ALL STEPS ═══
+${plainSteps}
 
-═══ CURRENT STEP TO IMPLEMENT ═══
+═══ HOW TO READ INPUT ═══
+Below this you'll get the current step pointer and the current HTML. Modify the HTML to implement only the current step.`;
+
+  const dynamicUserContent = `═══ CURRENT STEP (${stepIndex + 1} of ${allSteps.length}) ═══
 ${currentStep}
 
 ═══ CURRENT HTML (compact form — preserve this style in output) ═══
@@ -122,8 +144,10 @@ ${compactedHtml}
 ═══ TASK ═══
 Modify the HTML above to implement ONLY the current step. Return the complete modified HTML in the same compact form.`;
 
+  const startedAt = Date.now();
   try {
-    const message = await callSonnetWithRetry(userMessage);
+    const message = await callSonnetWithRetry(stableUserContent, dynamicUserContent);
+    const anthropicMs = Date.now() - startedAt;
     if (message.stop_reason === 'max_tokens') throw new TruncatedOutputError();
 
     const content = message.content[0];
@@ -139,9 +163,35 @@ Modify the HTML above to implement ONLY the current step. Return the complete mo
       return NextResponse.json({ error: 'Step produced invalid HTML' }, { status: 500 });
     }
 
+    // Structured timing log — searchable in Vercel dashboard. cache_read_input_tokens
+    // > 0 means the prompt cache hit (steps 2..N within 5 min should hit).
+    const usage = message.usage as {
+      input_tokens?: number; output_tokens?: number;
+      cache_read_input_tokens?: number; cache_creation_input_tokens?: number;
+    } | undefined;
+    console.log(JSON.stringify({
+      event: 'step_done',
+      stepIndex,
+      stepCount: allSteps.length,
+      htmlInBytes: compactedHtml.length,
+      htmlOutBytes: html.length,
+      anthropicMs,
+      inputTokens: usage?.input_tokens,
+      outputTokens: usage?.output_tokens,
+      cacheReadTokens: usage?.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: usage?.cache_creation_input_tokens ?? 0,
+    }));
+
     return NextResponse.json({ html });
   } catch (err) {
-    console.error(err);
+    console.error(JSON.stringify({
+      event: 'step_failed',
+      stepIndex,
+      htmlInBytes: compactedHtml.length,
+      elapsedMs: Date.now() - startedAt,
+      errorName: (err as Error)?.name,
+      errorMessage: (err as Error)?.message,
+    }));
     if (err instanceof TruncatedOutputError) {
       return NextResponse.json({ error: 'This step produced too much code to fit in one generation. Try splitting it into smaller steps.' }, { status: 500 });
     }
