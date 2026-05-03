@@ -110,3 +110,17 @@ model Waitlist {
 
   @@index([createdAt])
 }
+
+// One puzzle per day for the Connections-with-naming hero game.
+// `categories` is a 4-element JSON array; each element is:
+//   { name: string, acceptable: string[], words: string[] }
+// `acceptable` is the LLM's pre-generated alt phrasings — used for Tier 1
+// matching at play time (instant, free); judge fallback handles the rest.
+model DailyPuzzle {
+  id         String   @id @default(cuid())
+  date       String   @unique // YYYY-MM-DD in UTC
+  categories Json
+  createdAt  DateTime @default(now())
+
+  @@index([date])
+}

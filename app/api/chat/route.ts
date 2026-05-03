@@ -35,7 +35,14 @@ Be brief. Never dump code. Never explain the HTML. Talk about what the player wi
 type ChatKind = 'chat' | 'plan' | 'generate';
 type Plan = { summary: string; steps: string[] };
 
-function parseAssistant(text: string): { kind: ChatKind; content: string; plan?: Plan; instruction?: string } {
+// Phrases that indicate the model is promising to build something. The system
+// prompt forbids using these in `chat` kind, but Haiku occasionally ignores
+// the rule and replies "Building that now." with kind: 'chat' — leaving the
+// user staring at a "promise" that never executes. We catch it post-parse.
+const BUILD_PROMISE_PATTERN =
+  /\b(building (it|that|this) now|building that|let me build|i['']?ll build|i['']?ll get (to|on) (it|this|that)|on it|shipping now|here (we|you) go|coming (up|right up)|starting now|let me ship|i['']?ll (ship|implement|add)|implementing (it|this|that) now)\b/i;
+
+function parseAssistant(text: string, userMessage: string): { kind: ChatKind; content: string; plan?: Plan; instruction?: string } {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return { kind: 'chat', content: text.slice(0, 500) };
   try {
@@ -46,7 +53,18 @@ function parseAssistant(text: string): { kind: ChatKind; content: string; plan?:
     if (parsed.kind === 'generate' && typeof parsed.instruction === 'string') {
       return { kind: 'generate', content: String(parsed.content ?? ''), instruction: parsed.instruction };
     }
-    return { kind: 'chat', content: String(parsed.content ?? text.slice(0, 500)) };
+
+    // Salvage path: model classified as chat but the content reads like
+    // "Building that now." — the rule says use generate. Coerce it: keep the
+    // friendly message, fall back to the user's literal request as the
+    // instruction (good enough — their request describes what they want).
+    const chatContent = String(parsed.content ?? text.slice(0, 500));
+    if (parsed.kind === 'chat' && BUILD_PROMISE_PATTERN.test(chatContent)) {
+      console.warn('[chat] Coerced kind chat→generate after build-promise leak:', chatContent.slice(0, 120));
+      return { kind: 'generate', content: chatContent, instruction: userMessage };
+    }
+
+    return { kind: 'chat', content: chatContent };
   } catch {
     return { kind: 'chat', content: text.slice(0, 500) };
   }
@@ -110,7 +128,7 @@ export async function POST(req: Request) {
       messages,
     });
     const text = (response.content[0] as { type: string; text: string }).text;
-    parsed = parseAssistant(text);
+    parsed = parseAssistant(text, userMessage);
   } catch (err) {
     console.error(err);
     // Detect Anthropic credit-balance errors and surface them with a friendly message
