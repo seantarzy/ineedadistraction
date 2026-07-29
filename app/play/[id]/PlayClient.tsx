@@ -7,13 +7,9 @@ import type { Widget } from '../../lib/store';
 import BrainTeaser from '../../components/BrainTeaser';
 import MemoryGame from '../../components/MemoryGame';
 import FactGenerator from '../../components/FactGenerator';
-import Wordle from '../../components/Wordle';
-import Connections from '../../components/Connections';
 
 function BuiltinGame({ component, onBack }: { component: string; onBack: () => void }) {
   switch (component) {
-    case 'Wordle':       return <Wordle onBack={onBack} />;
-    case 'Connections':  return <Connections onBack={onBack} />;
     case 'BrainTeaser':  return <BrainTeaser onBack={onBack} />;
     case 'MemoryGame':   return <MemoryGame onBack={onBack} />;
     case 'FactGenerator':return <FactGenerator onBack={onBack} />;

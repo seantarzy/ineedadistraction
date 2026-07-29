@@ -4,8 +4,6 @@ import { TEMPLATES } from '../app/lib/templates';
 const prisma = new PrismaClient();
 
 const SEED_BUILTINS = [
-  { id: 'wordle', title: 'Word Sprint', description: 'Decode the 5-letter word in 6 tries and keep your solving streak sharp', emoji: '🔤', component: 'Wordle', votes: 128, tags: ['word', 'brain', 'daily'], daysAgo: 7 },
-  { id: 'connections', title: 'Connections', description: 'Find four hidden groups of related words and test your pattern-matching brain', emoji: '🔗', component: 'Connections', votes: 94, tags: ['word', 'pattern', 'daily'], daysAgo: 6 },
   { id: 'brainteaser', title: 'Daily Brain Teaser', description: 'Solve a quick riddle, use a hint if you need one, and keep your mind moving', emoji: '🧩', component: 'BrainTeaser', votes: 77, tags: ['riddle', 'logic', 'brain'], daysAgo: 5 },
   { id: 'memory', title: 'Memory Sprint', description: 'Match the pairs fast, minimize moves, and chase a better memory run', emoji: '🎴', component: 'MemoryGame', votes: 61, tags: ['memory', 'speed', 'brain'], daysAgo: 4 },
   { id: 'facts', title: 'Curiosity Cards', description: 'Flip through surprising facts and feed the brainy side of your next break', emoji: '💡', component: 'FactGenerator', votes: 45, tags: ['trivia', 'curiosity', 'brain'], daysAgo: 3 },
