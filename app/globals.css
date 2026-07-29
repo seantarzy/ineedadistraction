@@ -1,25 +1,81 @@
 @import "tailwindcss";
 
+/* Arcade cabinet theme — dark by design, not tied to OS color scheme, so
+   every visitor gets the same neon-on-black look regardless of prefers-color-scheme. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #0a0612;
+  --foreground: #f4f0ff;
+  --arcade-panel: #150f24;
+  --arcade-border: rgba(168, 85, 247, 0.35);
+  --arcade-purple: #a855f7;
+  --arcade-pink: #ec4899;
+  --arcade-orange: #fb923c;
+  --arcade-cyan: #22d3ee;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  .font-pixel {
+    font-family: var(--font-pixel), monospace;
+  }
+
+  .font-arcade {
+    font-family: var(--font-arcade), monospace;
+  }
+
+  /* Neon gradient text — the purple/pink/orange marquee look used across the site */
+  .neon-text {
+    background-image: linear-gradient(to right, #c084fc, #f472b6, #fdba74);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .neon-glow-purple {
+    box-shadow: 0 0 10px rgba(168, 85, 247, 0.55), 0 0 28px rgba(168, 85, 247, 0.2);
+  }
+  .neon-glow-pink {
+    box-shadow: 0 0 10px rgba(236, 72, 153, 0.55), 0 0 28px rgba(236, 72, 153, 0.2);
+  }
+  .neon-border {
+    border-color: var(--arcade-border);
+  }
+
+  /* Subtle CRT scanline texture — apply to a positioned container, never to a
+     fixed viewport overlay, so it never sits on top of the sandboxed game iframes. */
+  .crt-scanlines {
+    position: relative;
+    isolation: isolate;
+  }
+  .crt-scanlines::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.035) 0px,
+      rgba(255, 255, 255, 0.035) 1px,
+      transparent 1px,
+      transparent 3px
+    );
+  }
+
+  .blink-cursor::after {
+    content: "_";
+    animation: arcade-blink 1s steps(1) infinite;
+  }
+  @keyframes arcade-blink {
+    50% { opacity: 0; }
   }
 }

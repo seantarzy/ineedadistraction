@@ -250,18 +250,18 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
 
   if (sourceLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950 text-white">
-        <p className="text-gray-400">Loading game...</p>
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0612] text-white">
+        <p className="text-purple-300/60">Loading game...</p>
       </div>
     );
   }
 
   if (!source) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-950 text-white">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-[#0a0612] text-white">
         <p className="text-5xl">😕</p>
-        <p className="text-xl font-bold">Game not found</p>
-        <button onClick={() => router.push('/')} className="bg-purple-600 text-white px-5 py-2 rounded-xl font-semibold">
+        <p className="font-pixel text-sm neon-text">Game not found</p>
+        <button onClick={() => router.push('/')} className="bg-purple-600 text-white px-5 py-2 rounded-xl font-semibold neon-glow-purple">
           Back to games
         </button>
       </div>
@@ -625,15 +625,17 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
 
   async function handleUnpublish() {
     if (!isEditMode || !isSignedIn) return;
-    if (!confirm(`Take "${source!.title}" off the market? Players won't be able to find or remix it anymore. This can't be undone.`)) return;
+    if (!confirm(`Take "${source!.title}" off the market? Players won't be able to find or remix it. You can republish from your dashboard later.`)) return;
     try {
-      const res = await fetch(`/api/widgets/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/widgets/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ published: false }),
+      });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to unpublish');
-      if (draftIdRef.current) {
-        await fetch(`/api/drafts/${draftIdRef.current}`, { method: 'DELETE', headers: ownerHeaders() }).catch(() => {});
-        draftIdRef.current = null;
-      }
-      router.push('/dashboard');
+      // Keep the draft (and its chat history) — the widget still exists, just
+      // hidden, so the next edit session resumes the same draft normally.
+      router.push('/dashboard?tab=mine');
     } catch (err) {
       setEmailError(err instanceof Error ? err.message : 'Failed to unpublish');
     }
@@ -671,6 +673,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
 
     if (isSignedIn) {
       try {
+        const parentId = source?.id && source.id !== 'blank' ? source.id : undefined;
         const res = await fetch('/api/widgets', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -682,6 +685,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             author: 'Me',
             tags: source!.id ? [source!.id] : [],
             remixable: allowRemixes,
+            parentId,
           }),
         });
         const data = await res.json();
@@ -699,6 +703,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
 
     if (!email.trim()) return;
     try {
+      const parentId = source?.id && source.id !== 'blank' ? source.id : undefined;
       const res = await fetch('/api/auth/request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -711,6 +716,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             html: currentHtml,
             author: email.split('@')[0],
             remixable: allowRemixes,
+            parentId,
           },
         }),
       });
@@ -726,15 +732,15 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
   const hasRemixed = remixCount > 0;
 
   return (
-    <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#0a0612] text-white overflow-hidden">
       {/* Header */}
-      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900">
-        <button onClick={() => router.back()} className="text-sm text-gray-400 hover:text-white transition-colors">
+      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-purple-500/25 bg-[#150f24]">
+        <button onClick={() => router.back()} className="text-sm text-purple-300/60 hover:text-purple-100 transition-colors">
           ← Back
         </button>
         <div className="flex items-center gap-2">
           <span className="text-lg">{source.emoji}</span>
-          <span className="font-bold">{source.title}</span>
+          <span className="font-pixel text-[11px] neon-text">{source.title}</span>
           {isEditMode ? (
             <span className="text-xs bg-amber-600/30 text-amber-200 border border-amber-500/40 px-2 py-0.5 rounded-full font-semibold">
               ✏️ Editing published
@@ -742,7 +748,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           ) : hasRemixed ? (
             <span className="text-xs bg-purple-800/60 text-purple-300 px-2 py-0.5 rounded-full">remix v{remixCount}</span>
           ) : (
-            <span className="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">{template ? 'basic game' : 'original'}</span>
+            <span className="text-xs bg-purple-500/10 text-purple-300/60 px-2 py-0.5 rounded-full">{template ? 'basic game' : 'original'}</span>
           )}
         </div>
         <div className="w-16" />
@@ -769,22 +775,22 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         </div>
 
         {/* Sidebar — Chat thread */}
-        <div className="shrink-0 w-96 flex flex-col border-l border-gray-800 bg-gray-900">
+        <div className="shrink-0 w-96 flex flex-col border-l border-purple-500/25 bg-[#150f24]">
           {/* Thread header */}
-          <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800">
+          <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-purple-500/25">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold">💬 Chat</span>
-              {hasRemixed && <span className="text-xs text-gray-500">v{remixCount}</span>}
+              <span className="text-sm font-bold text-purple-100">💬 Chat</span>
+              {hasRemixed && <span className="text-xs text-purple-300/50">v{remixCount}</span>}
             </div>
-            {draftStatus === 'saving' && <span className="text-xs text-gray-500">Saving draft...</span>}
+            {draftStatus === 'saving' && <span className="text-xs text-purple-300/50">Saving draft...</span>}
             {draftStatus === 'saved' && <span className="text-xs text-green-400">✓ Saved</span>}
           </div>
 
           {/* Messages */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 flex flex-col gap-3">
             {messages.length === 0 && publishStep !== 'sent' && (
-              <div className="text-xs text-gray-500 leading-relaxed bg-gray-800/50 rounded-xl p-3 border border-gray-800">
-                <p className="font-semibold text-gray-300 mb-1">👋 Tell me what to build.</p>
+              <div className="text-xs text-purple-300/50 leading-relaxed bg-purple-500/5 rounded-xl p-3 border border-purple-500/20">
+                <p className="font-semibold text-purple-100 mb-1">👋 Tell me what to build.</p>
                 <p>{source.remixHint}</p>
               </div>
             )}
@@ -855,7 +861,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
             })}
 
             {chatStatus === 'chatting' && (
-              <div className="self-start bg-gray-800 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-gray-400 italic">
+              <div className="self-start bg-purple-500/10 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-purple-300/60 italic">
                 Thinking...
               </div>
             )}
@@ -891,14 +897,14 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                 </button>
               </div>
             ) : (
-              <div className="shrink-0 border-t border-gray-800 p-3 flex flex-col gap-2">
+              <div className="shrink-0 border-t border-purple-500/25 p-3 flex flex-col gap-2">
                 {queuedMessage && (
                   <div className="flex items-center gap-2 text-xs text-purple-300 bg-purple-900/20 border border-purple-700/40 rounded-lg px-2.5 py-1.5">
                     <span>📨 Queued — sends after current build:</span>
-                    <span className="text-gray-400 italic truncate flex-1">"{queuedMessage}"</span>
+                    <span className="text-purple-300/50 italic truncate flex-1">"{queuedMessage}"</span>
                     <button
                       onClick={() => setQueuedMessage(null)}
-                      className="text-gray-500 hover:text-gray-300 text-sm leading-none px-1"
+                      className="text-purple-300/50 hover:text-purple-100 text-sm leading-none px-1"
                       title="Cancel queued message"
                     >
                       ✕
@@ -908,7 +914,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                 <div className="flex items-end gap-2">
                   <textarea
                     ref={inputRef}
-                    className="flex-1 rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="flex-1 rounded-xl border border-purple-500/25 bg-[#0a0612] text-white p-2.5 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     placeholder={
                       isBusy
                         ? '⚡ Type to queue your next message...'
@@ -923,7 +929,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                       onClick={handleSend}
                       disabled={!input.trim()}
                       title={isBusy ? 'Queue this message' : 'Send'}
-                      className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:opacity-40 text-white font-bold h-10 px-4 rounded-xl transition-all text-sm"
+                      className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 disabled:opacity-40 text-white font-bold h-10 px-4 rounded-xl neon-glow-purple transition-all text-sm"
                     >
                       {isBusy ? '+' : '↑'}
                     </button>
@@ -931,7 +937,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                       <button
                         onClick={handleInterrupt}
                         title="Stop the current build"
-                        className="bg-gray-800 hover:bg-red-600 border border-gray-700 hover:border-red-500 text-gray-300 hover:text-white font-bold h-10 px-3 rounded-xl transition-all text-xs"
+                        className="bg-[#0a0612] hover:bg-red-600 border border-purple-500/25 hover:border-red-500 text-purple-300/60 hover:text-white font-bold h-10 px-3 rounded-xl transition-all text-xs"
                       >
                         ✋
                       </button>
@@ -946,12 +952,12 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
               and extra padding so the publish CTA can't be accidentally hit
               when finishing a chat message. */}
           {hasRemixed && publishStep !== 'sent' && (
-            <div className="shrink-0 border-t-4 border-gray-800 bg-gray-900/40 px-3 pt-4 pb-3 flex flex-col gap-2">
+            <div className="shrink-0 border-t-4 border-purple-500/25 bg-[#150f24]/60 px-3 pt-4 pb-3 flex flex-col gap-2">
               {history.length > 0 && (
                 <button
                   onClick={handleUndo}
                   disabled={isBusy}
-                  className="text-xs text-gray-500 hover:text-gray-300 text-center transition-colors disabled:opacity-40"
+                  className="text-xs text-purple-300/50 hover:text-purple-100 text-center transition-colors disabled:opacity-40"
                 >
                   ↩ Undo last change (v{remixCount} → v{remixCount - 1})
                 </button>
@@ -961,7 +967,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
                 <button
                   onClick={() => setShowPublish(true)}
                   disabled={isBusy}
-                  className="w-full bg-gray-800 hover:bg-gray-700 disabled:opacity-40 text-gray-200 font-semibold py-2.5 rounded-xl transition-all text-sm border border-gray-700"
+                  className="w-full bg-purple-600 hover:bg-purple-500 disabled:opacity-40 text-white font-semibold py-2.5 rounded-xl neon-glow-purple transition-all text-sm border border-purple-400/30"
                 >
                   {isEditMode ? '💾 Save changes' : '🚀 Publish this version'}
                 </button>
@@ -985,9 +991,9 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
           {publishStep === 'sent' && (
             <div className="flex flex-col items-center justify-center gap-3 p-6 text-center flex-1">
               <p className="text-4xl">📬</p>
-              <h3 className="font-bold text-lg">Check your inbox!</h3>
-              <p className="text-sm text-gray-400">We sent a link to <strong className="text-gray-200">{email}</strong></p>
-              <button onClick={() => router.push('/')} className="mt-3 bg-gray-800 hover:bg-gray-700 text-gray-200 font-semibold px-5 py-2.5 rounded-xl text-sm">
+              <h3 className="font-pixel text-sm neon-text">Check your inbox!</h3>
+              <p className="text-sm text-purple-300/50">We sent a link to <strong className="text-purple-100">{email}</strong></p>
+              <button onClick={() => router.push('/')} className="mt-3 bg-[#0a0612] hover:bg-purple-950/60 border border-purple-500/30 text-purple-100 font-semibold px-5 py-2.5 rounded-xl text-sm">
                 Back to games
               </button>
             </div>
@@ -1047,18 +1053,18 @@ function MessageBubble({ message, stepStates, isCurrentVersion, onApprovePlan, o
     return (
       <div className="self-start w-full flex flex-col gap-2">
         {message.content && (
-          <div className="bg-gray-800 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-gray-200">{message.content}</div>
+          <div className="bg-[#1a1330] rounded-2xl rounded-bl-md px-3 py-2 text-sm text-purple-100">{message.content}</div>
         )}
         <div className={`rounded-2xl p-3 flex flex-col gap-2 border ${cardClasses}`}>
           <div className="flex items-center justify-between">
             <span className={`text-xs font-bold uppercase tracking-wide ${headerColor}`}>{headerText}</span>
             {anyRunning && (
-              <span className="text-xs text-gray-500 tabular-nums">
+              <span className="text-xs text-purple-300/40 tabular-nums">
                 {stepStates.filter((s) => s.status === 'done').length} / {stepStates.length}
               </span>
             )}
           </div>
-          <p className={`text-sm leading-relaxed font-semibold ${allDone ? 'text-gray-300' : 'text-gray-100'}`}>{plan.summary}</p>
+          <p className={`text-sm leading-relaxed font-semibold ${allDone ? 'text-purple-200/70' : 'text-purple-50'}`}>{plan.summary}</p>
           <ul className="flex flex-col gap-2">
             {plan.steps.map((s, i) => (
               <StepRow
@@ -1110,7 +1116,7 @@ function MessageBubble({ message, stepStates, isCurrentVersion, onApprovePlan, o
         {canRevert && payload?.snapshotId && (
           <button
             onClick={() => onRevert(payload.snapshotId!, payload.version)}
-            className="text-[11px] bg-gray-800 hover:bg-amber-700 border border-gray-700 hover:border-amber-500 text-gray-300 hover:text-white px-2 py-1 rounded font-semibold transition-colors"
+            className="text-[11px] bg-[#1a1330] hover:bg-amber-700 border border-purple-500/25 hover:border-amber-500 text-purple-200/70 hover:text-white px-2 py-1 rounded font-semibold transition-colors"
           >
             ↩ Revert
           </button>
@@ -1121,7 +1127,7 @@ function MessageBubble({ message, stepStates, isCurrentVersion, onApprovePlan, o
 
   // Regular assistant chat
   return (
-    <div className="self-start max-w-[85%] bg-gray-800 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-gray-200 whitespace-pre-wrap">
+    <div className="self-start max-w-[85%] bg-[#1a1330] rounded-2xl rounded-bl-md px-3 py-2 text-sm text-purple-100 whitespace-pre-wrap">
       {message.content}
     </div>
   );
@@ -1136,11 +1142,11 @@ function StepRow({ index, text, state, onRetry, isBusy }: {
     return (
       <li className="flex items-start gap-2 text-xs leading-relaxed">
         <span className="shrink-0 w-4 h-4 mt-0.5 rounded bg-green-600 border border-green-500 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
-        <span className="text-gray-400 line-through decoration-gray-600 flex-1">
-          <span className="text-gray-500 font-mono mr-1">{num}.</span>{text}
+        <span className="text-purple-300/50 line-through decoration-purple-300/30 flex-1">
+          <span className="text-purple-300/40 font-mono mr-1">{num}.</span>{text}
         </span>
         {state.durationMs && (
-          <span className="text-[10px] text-gray-600 tabular-nums shrink-0">{(state.durationMs / 1000).toFixed(0)}s</span>
+          <span className="text-[10px] text-purple-300/30 tabular-nums shrink-0">{(state.durationMs / 1000).toFixed(0)}s</span>
         )}
       </li>
     );
@@ -1183,9 +1189,9 @@ function StepRow({ index, text, state, onRetry, isBusy }: {
   // pending
   return (
     <li className="flex items-start gap-2 text-xs leading-relaxed">
-      <span className="shrink-0 w-4 h-4 mt-0.5 rounded border border-gray-600" />
-      <span className="text-gray-400 flex-1">
-        <span className="text-gray-500 font-mono mr-1">{num}.</span>{text}
+      <span className="shrink-0 w-4 h-4 mt-0.5 rounded border border-purple-500/25" />
+      <span className="text-purple-300/50 flex-1">
+        <span className="text-purple-300/40 font-mono mr-1">{num}.</span>{text}
       </span>
     </li>
   );
@@ -1208,11 +1214,11 @@ const REASONING_PHRASES = [
 // reasoning lives in the chat thread (ReasoningBubble) where the user is looking.
 function GeneratingBanner({ version, elapsed }: { version: number; reasoningIdx: number; elapsed: number }) {
   return (
-    <div className="absolute top-3 left-3 z-10 flex items-center gap-2 bg-gray-900/95 backdrop-blur-sm border border-purple-600/60 rounded-full px-3 py-1.5 shadow-lg">
+    <div className="absolute top-3 left-3 z-10 flex items-center gap-2 bg-[#150f24]/95 backdrop-blur-sm border border-purple-600/60 rounded-full px-3 py-1.5 shadow-lg">
       <div className="text-sm animate-spin">⚙️</div>
-      <span className="text-xs font-bold text-gray-200">Building v{version}</span>
-      <span className="text-xs text-gray-500 tabular-nums font-mono">{elapsed}s</span>
-      <span className="text-[10px] text-gray-500 italic hidden sm:inline ml-1">— keep playing</span>
+      <span className="text-xs font-bold text-purple-100">Building v{version}</span>
+      <span className="text-xs text-purple-300/40 tabular-nums font-mono">{elapsed}s</span>
+      <span className="text-[10px] text-purple-300/40 italic hidden sm:inline ml-1">— keep playing</span>
     </div>
   );
 }
@@ -1223,13 +1229,13 @@ function GeneratingBanner({ version, elapsed }: { version: number; reasoningIdx:
 function ReasoningBubble({ reasoningIdx, elapsed, stepLabel }: { reasoningIdx: number; elapsed: number; stepLabel: string | null }) {
   const phrase = REASONING_PHRASES[reasoningIdx % REASONING_PHRASES.length];
   return (
-    <div className="self-start max-w-[90%] bg-gray-800/80 border border-purple-700/30 rounded-2xl rounded-bl-md px-3 py-2 flex items-center gap-2.5 text-sm">
+    <div className="self-start max-w-[90%] bg-purple-500/10 border border-purple-700/30 rounded-2xl rounded-bl-md px-3 py-2 flex items-center gap-2.5 text-sm">
       <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse shrink-0" />
-      <span className="text-gray-300 truncate">
+      <span className="text-purple-200/70 truncate">
         {stepLabel && <span className="text-purple-400 font-mono mr-1.5">{stepLabel}</span>}
         <span className="italic">{phrase}...</span>
       </span>
-      <span className="text-xs text-gray-500 tabular-nums shrink-0 ml-auto">{elapsed}s</span>
+      <span className="text-xs text-purple-300/40 tabular-nums shrink-0 ml-auto">{elapsed}s</span>
     </div>
   );
 }
@@ -1246,27 +1252,27 @@ function PublishForm(props: {
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide">
+      <p className="text-xs text-purple-300/50 font-semibold uppercase tracking-wide">
         {props.isEditMode ? 'Save changes' : 'Publish'}
       </p>
       <input
-        className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+        className="w-full rounded-xl border border-purple-500/25 bg-[#1a1330] text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
         placeholder="Game title"
         value={props.gameTitle}
         onChange={(e) => props.setGameTitle(e.target.value)}
       />
       <textarea
-        className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500"
+        className="w-full rounded-xl border border-purple-500/25 bg-[#1a1330] text-white p-2.5 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-purple-500"
         placeholder="How to play... (auto-filled by AI, you can edit)"
         value={props.howToPlay}
         onChange={(e) => props.setHowToPlay(e.target.value)}
       />
       <div className="flex items-center justify-between">
-        <label className="text-sm text-gray-300 font-medium">Allow remixes</label>
+        <label className="text-sm text-purple-200/70 font-medium">Allow remixes</label>
         <button
           type="button"
           onClick={() => props.setAllowRemixes(!props.allowRemixes)}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${props.allowRemixes ? 'bg-purple-600' : 'bg-gray-600'}`}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${props.allowRemixes ? 'bg-purple-600' : 'bg-purple-500/20'}`}
         >
           <span className={`inline-block h-4 w-4 rounded-full bg-white transition-transform ${props.allowRemixes ? 'translate-x-6' : 'translate-x-1'}`} />
         </button>
@@ -1274,7 +1280,7 @@ function PublishForm(props: {
       {!props.isSignedIn && (
         <input
           type="email"
-          className="w-full rounded-xl border border-gray-700 bg-gray-800 text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+          className="w-full rounded-xl border border-purple-500/25 bg-[#1a1330] text-white p-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
           placeholder="your@email.com"
           value={props.email}
           onChange={(e) => props.setEmail(e.target.value)}
@@ -1290,7 +1296,7 @@ function PublishForm(props: {
       >
         {props.isEditMode ? '💾 Save Changes' : props.isSignedIn ? '🚀 Publish Now' : 'Send Magic Link →'}
       </button>
-      <button onClick={props.onCancel} className="text-xs text-gray-600 hover:text-gray-400 text-center">
+      <button onClick={props.onCancel} className="text-xs text-purple-300/30 hover:text-purple-300/50 text-center">
         ← {props.isEditMode ? 'Keep editing' : 'Keep remixing'}
       </button>
       {props.onUnpublish && (

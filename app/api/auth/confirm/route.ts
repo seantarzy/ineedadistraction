@@ -33,6 +33,7 @@ export async function GET(req: Request) {
     author: pending.gameData.author || pending.email.split('@')[0],
     tags: [],
     remixable: pending.gameData.remixable ?? true,
+    parentId: pending.gameData.parentId,
   });
 
   return NextResponse.redirect(`${BASE_URL}/play/${widget.id}?new=1`);

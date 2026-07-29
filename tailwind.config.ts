@@ -12,6 +12,10 @@ const config: Config = {
         background: "var(--background)",
         foreground: "var(--foreground)",
       },
+      fontFamily: {
+        pixel: ["var(--font-pixel)", "monospace"],
+        arcade: ["var(--font-arcade)", "monospace"],
+      },
     },
   },
   plugins: [],

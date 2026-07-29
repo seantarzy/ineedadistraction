@@ -25,12 +25,20 @@ model Widget {
   tags        String[] @default([])
   userId      String?  // Clerk user ID
   remixable   Boolean  @default(true)
+  published   Boolean  @default(true)
+  views       Int      @default(0)
+  parentId    String?
+
+  parent      Widget?  @relation("WidgetRemixes", fields: [parentId], references: [id], onDelete: SetNull)
+  remixes     Widget[] @relation("WidgetRemixes")
 
   voteRecords Vote[]
 
   @@index([userId])
   @@index([votes])
   @@index([createdAt])
+  @@index([published])
+  @@index([parentId])
 }
 
 model Draft {

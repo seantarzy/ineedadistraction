@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
-import { deleteWidget, getWidget, updateWidget } from '@/app/lib/store';
+import { deleteWidget, getWidget, getWidgetForOwner, updateWidget } from '@/app/lib/store';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const widget = await getWidget(id);
+  // Try public read first; if the widget is unpublished, fall through to an
+  // owner-scoped read so authors can still load their own games for editing.
+  let widget = await getWidget(id);
+  if (!widget) {
+    const { userId } = await auth();
+    if (userId) widget = await getWidgetForOwner(id, userId);
+  }
   if (!widget) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
@@ -21,7 +27,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  let body: Partial<{ title: string; description: string; emoji: string; html: string; remixable: boolean }>;
+  let body: Partial<{ title: string; description: string; emoji: string; html: string; remixable: boolean; published: boolean }>;
   try {
     body = await req.json();
   } catch {
@@ -36,7 +42,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   return NextResponse.json(updated);
 }
 
-// DELETE — author unpublishes / takes the game off the market.
+// DELETE — hard delete. Used from the dashboard's "Unpublished" section to
+// wipe a game permanently after the author has already unpublished it (which
+// is the soft-delete via PATCH { published: false }). Vote rows cascade.
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { userId } = await auth();

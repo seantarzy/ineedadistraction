@@ -10,6 +10,7 @@ export type PendingAuth = {
     html: string;
     author: string;
     remixable?: boolean;
+    parentId?: string;
   } | null;
   expiresAt: number;
 };

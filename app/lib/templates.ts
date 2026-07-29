@@ -425,14 +425,438 @@ const BLANK: Template = {
   id: 'blank',
   title: 'From Scratch',
   emoji: '✨',
-  description: 'Describe any game and AI builds it',
-  remixHint: 'Describe the game you want to make...',
+  description: 'Describe a clever little game and AI builds it',
+  remixHint: 'Describe the brainy mini-game you want to make...',
   html: `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Blank</title>
 <style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#0f0f1a;color:#a78bfa;font-family:system-ui,sans-serif;font-size:18px;text-align:center;padding:24px}</style>
-</head><body><p>Describe your game in the sidebar and hit Generate ✨</p></body></html>`,
+</head><body><p>Describe your brainy game idea in the sidebar and hit Generate ✨</p></body></html>`,
 };
 
-export const TEMPLATES: Template[] = [SNAKE, MATH_QUIZ, TRIVIA, BLANK];
+const MATH_RACER: Template = {
+  id: 'math-racer',
+  title: 'Math Racer',
+  emoji: '🏎️',
+  description: 'Answer math to accelerate — beat rivals that speed up each level',
+  remixHint: 'e.g. make it multiplication-only, turn the cars into rockets in space, add a nitro streak bonus, or theme it around money math...',
+  html: `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Math Racer</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:radial-gradient(circle at top,#1e1b4b,#0a0612 65%);color:#f4f0ff;font-family:system-ui,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;user-select:none}
+#app{width:min(520px,100%);background:rgba(15,12,32,.9);border:1px solid rgba(168,85,247,.3);border-radius:24px;padding:20px;box-shadow:0 0 40px rgba(168,85,247,.2)}
+.title{font-size:26px;font-weight:900;text-align:center;background:linear-gradient(90deg,#c084fc,#f472b6,#fb923c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}
+.sub{text-align:center;color:#c4b5fd;font-size:13px;margin-bottom:14px;line-height:1.5}
+.hud{display:flex;justify-content:space-between;font-size:13px;font-weight:700;color:#a5b4fc;margin-bottom:10px}
+.hud b{color:#fff}
+.speed-wrap{height:8px;background:#0a0612;border-radius:99px;overflow:hidden;margin-bottom:12px;border:1px solid rgba(129,140,248,.2)}
+#speed{height:100%;width:15%;background:linear-gradient(90deg,#22d3ee,#a855f7,#ec4899);transition:width .2s}
+#track{position:relative;background:#0a0612;border:1px solid rgba(129,140,248,.25);border-radius:16px;padding:8px 0;overflow:hidden;margin-bottom:14px}
+.lane{position:relative;height:36px;border-bottom:2px dashed rgba(129,140,248,.14)}
+.lane:last-child{border-bottom:none}
+.finish{position:absolute;right:30px;top:0;height:100%;width:6px;background:repeating-linear-gradient(45deg,#fff 0 6px,#000 6px 12px);opacity:.35}
+.car{position:absolute;top:50%;transform:translate(-50%,-50%);font-size:25px;left:2%;transition:left .12s linear}
+#q{font-size:40px;font-weight:900;text-align:center;margin:4px 0 14px;letter-spacing:1px}
+#opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opt{background:linear-gradient(135deg,#6d28d9,#9333ea);color:#fff;border:none;border-radius:14px;padding:16px;font-size:22px;font-weight:800;cursor:pointer;transition:transform .1s,box-shadow .15s;box-shadow:0 6px 16px rgba(124,58,237,.3)}
+.opt:hover:not(:disabled){transform:translateY(-2px)}
+.opt:active{transform:scale(.97)}
+.opt.good{background:linear-gradient(135deg,#059669,#10b981)!important}
+.opt.bad{background:linear-gradient(135deg,#dc2626,#f97316)!important}
+.msg{text-align:center;font-size:14px;font-weight:700;height:20px;margin-top:10px;color:#c4b5fd}
+.cta{width:100%;margin-top:12px;padding:15px;border-radius:16px;border:none;background:linear-gradient(135deg,#a855f7,#ec4899);color:#fff;font-size:17px;font-weight:800;cursor:pointer;box-shadow:0 0 24px rgba(168,85,247,.35)}
+.cta:hover{opacity:.92}
+#start,#result{text-align:center}
+#result{display:none}
+.big{font-size:22px;font-weight:900;margin:8px 0}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="title">Math Racer</div>
+  <div class="sub">Answer fast to accelerate — wrong answers slow you down!</div>
+
+  <div id="start">
+    <p style="color:#cbd5e1;line-height:1.55;margin:6px 0 16px">Solve quick math to boost your car past the rivals. Each level the other racers get faster — how many wins can you stack up?</p>
+    <button class="cta" id="startBtn">Start Engine</button>
+  </div>
+
+  <div id="game" style="display:none">
+    <div class="hud"><span>Level <b id="lvl">1</b></span><span>Place <b id="place">1st</b></span><span>Wins <b id="wins">0</b></span></div>
+    <div class="speed-wrap"><div id="speed"></div></div>
+    <div id="track"></div>
+    <div id="q"></div>
+    <div id="opts"></div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div id="result">
+    <div id="badge" style="font-size:50px"></div>
+    <div class="big" id="resultTitle"></div>
+    <div class="sub" id="resultText" style="margin-bottom:0"></div>
+    <button class="cta" id="againBtn">Race Again</button>
+  </div>
+</div>
+<script>
+var CARS=['🏎️','🚗','🚙','🛻'];
+var BASE=5;
+var trackEl=document.getElementById('track');
+var qEl=document.getElementById('q'),optsEl=document.getElementById('opts'),msgEl=document.getElementById('msg');
+var level=1,wins=0,ans=0,playerSpeed=BASE,running=false,raf=0,lastT=0,cars=[];
+
+function rnd(mn,mx){return Math.floor(Math.random()*(mx-mn+1))+mn;}
+function shuffle(a){for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t;}return a;}
+function ordinal(n){return n+(['th','st','nd','rd'][(n%100>10&&n%100<14)?0:(n%10<4?n%10:0)]);}
+function setMsg(t,c){msgEl.textContent=t;msgEl.style.color=c||'#c4b5fd';}
+function aiBase(){return 7+(level-1)*1.7;}
+
+function buildTrack(){
+  trackEl.innerHTML='';cars=[];
+  for(var i=0;i<4;i++){
+    var lane=document.createElement('div');lane.className='lane';
+    var fin=document.createElement('div');fin.className='finish';lane.appendChild(fin);
+    var car=document.createElement('div');car.className='car';car.textContent=CARS[i];lane.appendChild(car);
+    trackEl.appendChild(lane);
+    cars.push({pos:0,el:car,isPlayer:i===0});
+  }
+}
+
+function newQuestion(){
+  var ops=['+','-','×'];
+  var op=ops[rnd(0,2)];
+  var maxN=8+level*3,a,b;
+  if(op==='+'){a=rnd(1,maxN);b=rnd(1,maxN);ans=a+b;}
+  else if(op==='-'){a=rnd(2,maxN);b=rnd(1,a);ans=a-b;}
+  else{var m=Math.min(12,3+level*2);a=rnd(2,m);b=rnd(2,m);ans=a*b;}
+  qEl.textContent=a+' '+op+' '+b;
+  var seen={};seen[ans]=1;var opts=[ans];
+  while(opts.length<4){var d=ans+rnd(-6,6);if(d>=0&&!seen[d]){seen[d]=1;opts.push(d);}}
+  shuffle(opts);
+  optsEl.innerHTML='';
+  opts.forEach(function(o){
+    var btn=document.createElement('button');btn.className='opt';btn.textContent=o;
+    btn.onclick=function(){pick(o,btn);};
+    optsEl.appendChild(btn);
+  });
+}
+
+function pick(val,btn){
+  if(!running)return;
+  if(val===ans){playerSpeed=Math.min(32,playerSpeed+7);btn.classList.add('good');setMsg('Nice! Speed boost','#6ee7b7');}
+  else{playerSpeed=Math.max(2,playerSpeed-7);btn.classList.add('bad');setMsg('Oops — slowing down','#fca5a5');}
+  var all=document.querySelectorAll('.opt');
+  for(var i=0;i<all.length;i++)all[i].disabled=true;
+  setTimeout(function(){if(running)newQuestion();},240);
+}
+
+function updatePlace(){
+  var pp=cars[0].pos,rank=1;
+  for(var i=1;i<cars.length;i++)if(cars[i].pos>pp)rank++;
+  document.getElementById('place').textContent=ordinal(rank);
+}
+function updateSpeedBar(){document.getElementById('speed').style.width=Math.min(100,playerSpeed/32*100)+'%';}
+
+function loop(t){
+  if(!running)return;
+  if(!lastT)lastT=t;
+  var dt=Math.min(0.05,(t-lastT)/1000);lastT=t;
+  playerSpeed+=(BASE-playerSpeed)*0.7*dt;
+  cars[0].pos+=playerSpeed*dt;
+  for(var i=1;i<cars.length;i++)cars[i].pos+=(aiBase()+Math.sin(t/450+i*2)*1.3)*dt;
+  var maxPos=-1,winner=null;
+  for(var j=0;j<cars.length;j++){
+    var c=cars[j],p=Math.min(100,c.pos);
+    c.el.style.left=(2+p*0.9)+'%';
+    if(c.pos>maxPos){maxPos=c.pos;winner=c;}
+  }
+  updatePlace();updateSpeedBar();
+  if(maxPos>=100){endRace(winner.isPlayer);return;}
+  raf=requestAnimationFrame(loop);
+}
+
+function endRace(won){
+  running=false;cancelAnimationFrame(raf);
+  if(won){
+    wins++;level++;
+    document.getElementById('wins').textContent=wins;
+    setMsg('🏆 You won! Level '+level+' — rivals faster!','#fde68a');
+    setTimeout(startRace,1200);
+  }else{showResult();}
+}
+
+function showResult(){
+  document.getElementById('game').style.display='none';
+  var r=document.getElementById('result');r.style.display='block';
+  document.getElementById('badge').textContent=wins>=5?'🏆':wins>=3?'🥇':wins>=1?'🎖️':'🏁';
+  document.getElementById('resultTitle').textContent=wins===0?'Out of the running!':'You won '+wins+(wins===1?' race':' races')+'!';
+  document.getElementById('resultText').textContent='The rivals caught you at level '+level+'. Tap to line up again.';
+}
+
+function startRace(){
+  buildTrack();
+  playerSpeed=BASE;lastT=0;running=true;
+  document.getElementById('lvl').textContent=level;
+  document.getElementById('wins').textContent=wins;
+  document.getElementById('place').textContent='1st';
+  document.getElementById('start').style.display='none';
+  document.getElementById('result').style.display='none';
+  document.getElementById('game').style.display='block';
+  setMsg('');
+  newQuestion();
+  raf=requestAnimationFrame(loop);
+}
+
+document.getElementById('startBtn').onclick=function(){level=1;wins=0;startRace();};
+document.getElementById('againBtn').onclick=function(){level=1;wins=0;startRace();};
+</script>
+</body>
+</html>`,
+};
+
+const MEMORY_SEQUENCE: Template = {
+  id: 'memory-sequence',
+  title: 'Memory Sequence',
+  emoji: '🧩',
+  description: 'Watch the pattern light up, then repeat it — it grows each round',
+  remixHint: 'e.g. swap the pads for animal emojis, add a 5th or 6th pad, speed it up, or theme the colors and sounds around a mood...',
+  html: `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Memory Sequence</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:radial-gradient(circle at top,#1e1b4b,#0a0612 65%);color:#f4f0ff;font-family:system-ui,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;user-select:none}
+#app{width:min(420px,100%);background:rgba(15,12,32,.9);border:1px solid rgba(168,85,247,.3);border-radius:24px;padding:22px;box-shadow:0 0 40px rgba(168,85,247,.2);text-align:center}
+.title{font-size:26px;font-weight:900;background:linear-gradient(90deg,#c084fc,#f472b6,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}
+.sub{color:#c4b5fd;font-size:13px;margin-bottom:16px;line-height:1.5}
+.hud{display:flex;justify-content:center;gap:26px;font-size:14px;font-weight:700;color:#a5b4fc;margin-bottom:16px}
+.hud b{color:#fff}
+.pad{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:min(300px,78vw);margin:0 auto 10px}
+.tile{aspect-ratio:1;border:none;border-radius:20px;cursor:pointer;opacity:.5;transition:opacity .08s,filter .08s,transform .06s}
+.tile:disabled{cursor:default}
+.t0{background:#a855f7}.t1{background:#ec4899}.t2{background:#22d3ee}.t3{background:#fbbf24}
+.tile.lit{opacity:1;filter:brightness(1.5) saturate(1.2);box-shadow:0 0 30px rgba(255,255,255,.4);transform:scale(1.04)}
+.status{min-height:24px;font-size:15px;font-weight:700;color:#c4b5fd;margin:14px 0 4px}
+.cta{margin-top:8px;padding:14px 30px;border-radius:16px;border:none;background:linear-gradient(135deg,#a855f7,#ec4899);color:#fff;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 0 24px rgba(168,85,247,.35)}
+.cta:hover{opacity:.92}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="title">Memory Sequence</div>
+  <div class="sub">Watch the pads flash, then tap them back in order.</div>
+  <div class="hud"><span>Round <b id="round">0</b></span><span>Best <b id="best">0</b></span></div>
+  <div class="pad">
+    <button class="tile t0" data-i="0"></button>
+    <button class="tile t1" data-i="1"></button>
+    <button class="tile t2" data-i="2"></button>
+    <button class="tile t3" data-i="3"></button>
+  </div>
+  <div class="status" id="status">Press Start and watch closely</div>
+  <button class="cta" id="startBtn">Start</button>
+</div>
+<script>
+var tiles=[];
+var nodes=document.querySelectorAll('.tile');
+for(var k=0;k<nodes.length;k++)tiles.push(nodes[k]);
+var seq=[],inputIdx=0,round=0,best=0,accepting=false;
+var freqs=[329.63,415.30,523.25,659.25],actx=null;
+var statusEl=document.getElementById('status'),startBtn=document.getElementById('startBtn');
+
+function beep(i){
+  try{
+    if(!actx)actx=new (window.AudioContext||window.webkitAudioContext)();
+    var o=actx.createOscillator(),g=actx.createGain();
+    o.frequency.value=freqs[i];o.type='sine';o.connect(g);g.connect(actx.destination);
+    g.gain.setValueAtTime(0.16,actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001,actx.currentTime+0.3);
+    o.start();o.stop(actx.currentTime+0.32);
+  }catch(e){}
+}
+function flash(i,dur){var t=tiles[i];t.classList.add('lit');beep(i);setTimeout(function(){t.classList.remove('lit');},dur);}
+function setStatus(t){statusEl.textContent=t;}
+function setHud(){document.getElementById('round').textContent=round;document.getElementById('best').textContent=best;}
+
+function playback(){
+  accepting=false;setStatus('Watch...');
+  var on=Math.max(200,520-round*18),gap=Math.max(90,220-round*8);
+  seq.forEach(function(idx,k){setTimeout(function(){flash(idx,on-60);},k*(on+gap)+400);});
+  setTimeout(function(){accepting=true;inputIdx=0;setStatus('Your turn — repeat it');},seq.length*(on+gap)+400);
+}
+function nextRound(){round++;setHud();seq.push(Math.floor(Math.random()*4));playback();}
+function press(i){
+  if(!accepting)return;
+  flash(i,170);
+  if(i===seq[inputIdx]){
+    inputIdx++;
+    if(inputIdx===seq.length){accepting=false;setStatus('✓ Nice!');setTimeout(nextRound,750);}
+  }else{gameOver();}
+}
+function gameOver(){
+  accepting=false;
+  var done=round-1;
+  if(done>best)best=done;
+  setHud();
+  setStatus('💥 Missed it — you recalled a sequence of '+done+'!');
+  tiles.forEach(function(t){t.classList.add('lit');});
+  setTimeout(function(){tiles.forEach(function(t){t.classList.remove('lit');});},350);
+  startBtn.textContent='Play Again';startBtn.style.display='inline-block';
+}
+function start(){seq=[];round=0;inputIdx=0;setHud();startBtn.style.display='none';nextRound();}
+
+tiles.forEach(function(t){t.onclick=function(){press(parseInt(t.getAttribute('data-i'),10));};});
+startBtn.onclick=start;
+</script>
+</body>
+</html>`,
+};
+
+const ODD_ONE_OUT: Template = {
+  id: 'odd-one-out',
+  title: 'Odd One Out',
+  emoji: '🔍',
+  description: 'Spot the tile that breaks the pattern before the clock runs out',
+  remixHint: 'e.g. use food emojis, make it word categories instead of emojis, add a lives system, or theme it around a season or holiday...',
+  html: `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Odd One Out</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:radial-gradient(circle at top,#1e1b4b,#0a0612 65%);color:#f4f0ff;font-family:system-ui,sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;user-select:none}
+#app{width:min(460px,100%);background:rgba(15,12,32,.9);border:1px solid rgba(168,85,247,.3);border-radius:24px;padding:20px;box-shadow:0 0 40px rgba(168,85,247,.2);text-align:center}
+.title{font-size:26px;font-weight:900;background:linear-gradient(90deg,#c084fc,#f472b6,#fb923c);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:4px}
+.sub{color:#c4b5fd;font-size:13px;margin-bottom:14px;line-height:1.5}
+.hud{display:flex;justify-content:space-between;font-size:14px;font-weight:700;color:#a5b4fc;margin-bottom:8px}
+.hud b{color:#fff}
+.bar{height:8px;background:#0a0612;border-radius:99px;overflow:hidden;margin-bottom:14px;border:1px solid rgba(129,140,248,.2)}
+#fill{height:100%;width:100%;background:linear-gradient(90deg,#22d3ee,#a855f7,#ec4899);transition:width .1s linear}
+#grid{display:grid;gap:8px;justify-content:center;margin:0 auto 6px;line-height:1}
+.cell{aspect-ratio:1;display:flex;align-items:center;justify-content:center;background:#191234;border:1px solid rgba(129,140,248,.18);border-radius:14px;cursor:pointer;transition:transform .06s,background .12s}
+.cell:hover{background:#241a45}
+.cell:active{transform:scale(.94)}
+.cell.good{background:#065f46!important}
+.cell.bad{background:#7f1d1d!important}
+.msg{min-height:20px;font-size:14px;font-weight:700;color:#c4b5fd;margin-top:8px}
+.cta{margin-top:10px;padding:14px 30px;border-radius:16px;border:none;background:linear-gradient(135deg,#a855f7,#ec4899);color:#fff;font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 0 24px rgba(168,85,247,.35)}
+.cta:hover{opacity:.92}
+#start,#result{margin-top:6px}
+#result{display:none}
+.big{font-size:22px;font-weight:900;margin:8px 0}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="title">Odd One Out</div>
+  <div class="sub">One tile doesn't belong. Tap it fast — the grid keeps growing.</div>
+
+  <div id="start">
+    <p style="color:#cbd5e1;line-height:1.55;margin:6px 0 14px">Find the odd tile before time runs out. Every correct tap adds time; every miss costs you. How high can you score?</p>
+    <button class="cta" id="startBtn">Start</button>
+  </div>
+
+  <div id="game" style="display:none">
+    <div class="hud"><span>Score <b id="score">0</b></span><span>Time <b id="time">45</b>s</span></div>
+    <div class="bar"><div id="fill"></div></div>
+    <div id="grid"></div>
+    <div class="msg" id="msg"></div>
+  </div>
+
+  <div id="result">
+    <div id="badge" style="font-size:50px"></div>
+    <div class="big" id="resultTitle"></div>
+    <div class="sub" id="resultText" style="margin-bottom:0"></div>
+    <button class="cta" id="againBtn">Play Again</button>
+  </div>
+</div>
+<script>
+var PAIRS=[
+  ['🔴','🟠'],['🟠','🟡'],['🟡','🟢'],['🟢','🔵'],['🔵','🟣'],['🟣','🔴'],['🟤','🔴'],
+  ['😀','😄'],['🙂','😊'],['😺','😸'],['😐','😑'],['😮','😯'],['🥲','😢'],
+  ['⭐','🌟'],['🌸','🌺'],['🐶','🐺'],['🐸','🐊'],['🍊','🍑'],['🌙','🌛'],['❤️','🧡']
+];
+var TOTAL=45;
+var score=0,time=TOTAL,round=0,playing=false,timer=null;
+var gridEl=document.getElementById('grid'),msgEl=document.getElementById('msg');
+
+function rnd(mn,mx){return Math.floor(Math.random()*(mx-mn+1))+mn;}
+function flashMsg(t,c){msgEl.textContent=t;msgEl.style.color=c||'#c4b5fd';}
+function updateHud(){
+  document.getElementById('score').textContent=score;
+  document.getElementById('time').textContent=Math.ceil(time);
+  document.getElementById('fill').style.width=(time/TOTAL*100)+'%';
+}
+
+function newRound(){
+  round++;
+  var cols=Math.min(6,3+Math.floor((round-1)/2)),n=cols*cols;
+  var pair=PAIRS[rnd(0,PAIRS.length-1)];
+  var common=pair[0],odd=pair[1];
+  if(Math.random()<0.5){common=pair[1];odd=pair[0];}
+  var oddAt=rnd(0,n-1);
+  gridEl.style.gridTemplateColumns='repeat('+cols+',1fr)';
+  gridEl.style.width=Math.min(360,cols*60)+'px';
+  gridEl.style.fontSize=Math.max(16,46-cols*4)+'px';
+  gridEl.innerHTML='';
+  for(var i=0;i<n;i++){
+    (function(idx){
+      var c=document.createElement('button');c.className='cell';
+      c.textContent=(idx===oddAt?odd:common);
+      c.onclick=function(){pick(idx===oddAt,c);};
+      gridEl.appendChild(c);
+    })(i);
+  }
+}
+
+function pick(correct,cell){
+  if(!playing)return;
+  if(correct){
+    score++;time=Math.min(TOTAL,time+1.2);
+    flashMsg('Sharp eye! +1','#6ee7b7');updateHud();
+    setTimeout(newRound,120);
+  }else{
+    time=Math.max(0,time-3);cell.classList.add('bad');
+    flashMsg('Not it — −3s','#fca5a5');updateHud();
+    setTimeout(function(){cell.classList.remove('bad');},280);
+    if(time<=0)end();
+  }
+}
+
+function tick(){time-=0.1;if(time<=0){time=0;updateHud();end();return;}updateHud();}
+
+function end(){
+  playing=false;if(timer){clearInterval(timer);timer=null;}
+  document.getElementById('game').style.display='none';
+  var r=document.getElementById('result');r.style.display='block';
+  document.getElementById('badge').textContent=score>=25?'🦅':score>=15?'🏆':score>=7?'🔍':'👀';
+  document.getElementById('resultTitle').textContent=score+(score===1?' spot!':' spots!');
+  document.getElementById('resultText').textContent=score>=15?'Eagle eyes. Can you beat it?':'Nice hunting — try to beat your score.';
+}
+
+function start(){
+  score=0;time=TOTAL;round=0;playing=true;
+  document.getElementById('start').style.display='none';
+  document.getElementById('result').style.display='none';
+  document.getElementById('game').style.display='block';
+  updateHud();flashMsg('');newRound();
+  timer=setInterval(tick,100);
+}
+
+document.getElementById('startBtn').onclick=start;
+document.getElementById('againBtn').onclick=start;
+</script>
+</body>
+</html>`,
+};
+
+export const TEMPLATES: Template[] = [MATH_RACER, MEMORY_SEQUENCE, ODD_ONE_OUT, MATH_QUIZ, TRIVIA, BLANK];
 export function getTemplate(id: string) {
   return TEMPLATES.find((t) => t.id === id) ?? null;
 }

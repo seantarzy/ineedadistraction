@@ -73,7 +73,7 @@ export default function WidgetCard({ widget, onPlay }: Props) {
 
   return (
     <div
-      className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${gradient} p-6 text-white shadow-lg hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] cursor-pointer flex flex-col`}
+      className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${gradient} p-6 text-white border border-white/10 shadow-lg hover:shadow-2xl hover:border-white/30 transition-all duration-300 hover:scale-[1.02] hover:shadow-[0_0_24px_rgba(255,255,255,0.15)] cursor-pointer flex flex-col`}
       onClick={() => { trackContentEngagement({ content_type: 'game', content_id: widget.id, engagement_type: 'interaction' }); onPlay(widget); }}
     >
       {/* Created badge */}
@@ -85,12 +85,23 @@ export default function WidgetCard({ widget, onPlay }: Props) {
 
       {/* Emoji + title */}
       <div className="text-4xl mb-3">{widget.emoji}</div>
-      <h2 className="text-xl font-bold mb-1">{widget.title}</h2>
+      <h2 className="font-pixel text-xs leading-relaxed mb-2">{widget.title}</h2>
       <p className="text-sm opacity-80 mb-4 flex-1">{widget.description}</p>
 
       {/* Author */}
       {widget.author && widget.type === 'user-created' && (
         <p className="text-xs opacity-60 mb-3">by {widget.author}</p>
+      )}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-white/80 font-arcade tracking-wide">
+        <span className="rounded-full bg-white/15 px-2 py-1 text-sm">{widget.views} plays</span>
+        <span className="rounded-full bg-white/15 px-2 py-1 text-sm">{widget.remixCount ?? 0} remixes</span>
+      </div>
+
+      {widget.parent && (
+        <p className="mb-3 text-xs text-white/70">
+          remixed from {widget.parent.emoji} {widget.parent.title}
+        </p>
       )}
 
       {/* Actions */}

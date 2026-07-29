@@ -4,18 +4,26 @@ import { TEMPLATES } from '../app/lib/templates';
 const prisma = new PrismaClient();
 
 const SEED_BUILTINS = [
-  { id: 'wordle', title: 'Wordle', description: 'Guess the 5-letter word in 6 tries', emoji: '🔤', component: 'Wordle', votes: 128, tags: ['word', 'puzzle'], daysAgo: 7 },
-  { id: 'connections', title: 'Connections', description: 'Find four groups of four related words', emoji: '🔗', component: 'Connections', votes: 94, tags: ['word', 'puzzle'], daysAgo: 6 },
-  { id: 'brainteaser', title: 'Brain Teaser', description: 'Challenge your mind with tricky riddles', emoji: '🧩', component: 'BrainTeaser', votes: 77, tags: ['puzzle', 'riddle'], daysAgo: 5 },
-  { id: 'memory', title: 'Memory Game', description: 'Match pairs before the clock runs out', emoji: '🎴', component: 'MemoryGame', votes: 61, tags: ['memory', 'speed'], daysAgo: 4 },
-  { id: 'facts', title: 'Random Facts', description: 'Discover fascinating facts you never knew', emoji: '💡', component: 'FactGenerator', votes: 45, tags: ['trivia', 'chill'], daysAgo: 3 },
+  { id: 'wordle', title: 'Word Sprint', description: 'Decode the 5-letter word in 6 tries and keep your solving streak sharp', emoji: '🔤', component: 'Wordle', votes: 128, tags: ['word', 'brain', 'daily'], daysAgo: 7 },
+  { id: 'connections', title: 'Connections', description: 'Find four hidden groups of related words and test your pattern-matching brain', emoji: '🔗', component: 'Connections', votes: 94, tags: ['word', 'pattern', 'daily'], daysAgo: 6 },
+  { id: 'brainteaser', title: 'Daily Brain Teaser', description: 'Solve a quick riddle, use a hint if you need one, and keep your mind moving', emoji: '🧩', component: 'BrainTeaser', votes: 77, tags: ['riddle', 'logic', 'brain'], daysAgo: 5 },
+  { id: 'memory', title: 'Memory Sprint', description: 'Match the pairs fast, minimize moves, and chase a better memory run', emoji: '🎴', component: 'MemoryGame', votes: 61, tags: ['memory', 'speed', 'brain'], daysAgo: 4 },
+  { id: 'facts', title: 'Curiosity Cards', description: 'Flip through surprising facts and feed the brainy side of your next break', emoji: '💡', component: 'FactGenerator', votes: 45, tags: ['trivia', 'curiosity', 'brain'], daysAgo: 3 },
 ];
 
 async function main() {
   for (const w of SEED_BUILTINS) {
     await prisma.widget.upsert({
       where: { id: w.id },
-      update: {},
+      update: {
+        title: w.title,
+        description: w.description,
+        emoji: w.emoji,
+        component: w.component,
+        votes: w.votes,
+        tags: w.tags,
+        remixable: true,
+      },
       create: {
         id: w.id,
         title: w.title,
@@ -34,7 +42,13 @@ async function main() {
   for (const t of TEMPLATES.filter((t) => t.id !== 'blank')) {
     await prisma.widget.upsert({
       where: { id: t.id },
-      update: { html: t.html }, // refresh HTML when templates evolve
+      update: {
+        title: t.title,
+        description: t.description,
+        emoji: t.emoji,
+        html: t.html,
+        remixable: true,
+      }, // refresh built-in starter metadata when templates evolve
       create: {
         id: t.id,
         title: t.title,
@@ -43,7 +57,7 @@ async function main() {
         type: 'builtin',
         html: t.html,
         votes: 50,
-        tags: [],
+        tags: ['template', 'brain'],
         remixable: true,
         createdAt: new Date(Date.now() - 86400000 * 3),
       },

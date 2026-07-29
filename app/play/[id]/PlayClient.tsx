@@ -3,7 +3,6 @@
 import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth, useUser } from '@clerk/nextjs';
-import { isAdmin } from '../../lib/admin';
 import type { Widget } from '../../lib/store';
 import BrainTeaser from '../../components/BrainTeaser';
 import MemoryGame from '../../components/MemoryGame';
@@ -18,7 +17,7 @@ function BuiltinGame({ component, onBack }: { component: string; onBack: () => v
     case 'BrainTeaser':  return <BrainTeaser onBack={onBack} />;
     case 'MemoryGame':   return <MemoryGame onBack={onBack} />;
     case 'FactGenerator':return <FactGenerator onBack={onBack} />;
-    default: return <p className="text-center text-gray-500 p-8">Game not found</p>;
+    default: return <p className="text-center text-purple-300/50 p-8">Game not found</p>;
   }
 }
 
@@ -55,6 +54,10 @@ function NewGameBanner() {
   );
 }
 
+function formatCount(n: number, singular: string, plural: string) {
+  return `${n.toLocaleString()} ${n === 1 ? singular : plural}`;
+}
+
 function PlayPageInner({ id }: { id: string }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -81,6 +84,19 @@ function PlayPageInner({ id }: { id: string }) {
           setVotes(data.votes);
           const stored: string[] = JSON.parse(localStorage.getItem('voted_widgets') ?? '[]');
           setVoted(stored.includes(data.id));
+
+          const viewKey = `inad_viewed_${data.id}_${new Date().toISOString().slice(0, 10)}`;
+          if (!localStorage.getItem(viewKey)) {
+            fetch(`/api/widgets/${data.id}/view`, { method: 'POST' })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((viewData) => {
+                if (viewData?.views) {
+                  setWidget((current) => current ? { ...current, views: viewData.views } : current);
+                  localStorage.setItem(viewKey, '1');
+                }
+              })
+              .catch(() => {});
+          }
         }
       });
   }, [id]);
@@ -118,12 +134,12 @@ function PlayPageInner({ id }: { id: string }) {
 
   if (notFound) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-gray-950 text-white">
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-[#0a0612] text-white">
         <p className="text-5xl">😕</p>
-        <h1 className="text-2xl font-bold">Game not found</h1>
+        <h1 className="font-pixel text-base neon-text">Game not found</h1>
         <button
           onClick={() => router.push('/')}
-          className="bg-purple-600 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-purple-700 transition-colors"
+          className="bg-purple-600 text-white px-6 py-2.5 rounded-xl font-semibold hover:bg-purple-500 neon-glow-purple transition-colors"
         >
           Back to all games
         </button>
@@ -133,28 +149,25 @@ function PlayPageInner({ id }: { id: string }) {
 
   if (!widget) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-950">
+      <div className="min-h-screen flex items-center justify-center bg-[#0a0612]">
         <div className="animate-spin text-4xl">⚙️</div>
       </div>
     );
   }
 
   const canRemix = widget.html && widget.remixable !== false;
-  // isAuthor is computed earlier (so handleShare can read it before the
-  // early returns). Non-admins can play and share, but Remix funnels them
-  // to the waitlist (with remix-flavored copy) since the create flow is alpha-gated.
-  const remixHref = isAdmin(user?.id) ? `/template/${widget.id}` : '/?source=remix';
+  const remixHref = `/template/${widget.id}`;
 
   return (
-    <div className="h-screen flex flex-col bg-gray-950 text-white overflow-hidden">
+    <div className="h-screen flex flex-col bg-[#0a0612] text-white overflow-hidden">
       {/* New game banner */}
       {isNew && <NewGameBanner />}
 
       {/* Header */}
-      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800 bg-gray-900">
+      <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-purple-500/25 bg-[#150f24]">
         <button
           onClick={() => router.push('/')}
-          className="text-sm text-gray-400 hover:text-white transition-colors"
+          className="text-sm text-purple-300/60 hover:text-purple-100 transition-colors"
         >
           ← All games
         </button>
@@ -162,9 +175,19 @@ function PlayPageInner({ id }: { id: string }) {
         <div className="flex items-center gap-2">
           <span className="text-lg">{widget.emoji}</span>
           <div className="text-center">
-            <h1 className="font-bold text-sm leading-tight">{widget.title}</h1>
+            <h1 className="font-pixel text-[11px] leading-tight neon-text">{widget.title}</h1>
             {widget.author && widget.type === 'user-created' && (
-              <p className="text-xs text-gray-500">by {widget.author}</p>
+              <p className="text-xs text-purple-300/40">by {widget.author}</p>
+            )}
+            <div className="mt-1 flex items-center justify-center gap-2 text-[11px] font-arcade text-cyan-300/60 tracking-wide">
+              <span>{formatCount(widget.views, 'play', 'plays')}</span>
+              <span>•</span>
+              <span>{formatCount(widget.remixCount ?? 0, 'remix', 'remixes')}</span>
+            </div>
+            {widget.parent && (
+              <p className="text-[11px] text-purple-300/40">
+                remixed from {widget.parent.emoji} {widget.parent.title}
+              </p>
             )}
           </div>
         </div>
@@ -174,7 +197,7 @@ function PlayPageInner({ id }: { id: string }) {
             onClick={handleVote}
             title={voted ? 'Unlike' : 'Like this game'}
             className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-lg transition-colors ${
-              voted ? 'bg-purple-800/60 text-purple-300' : 'text-gray-400 hover:text-white hover:bg-gray-800'
+              voted ? 'bg-purple-800/60 text-purple-300' : 'text-purple-300/50 hover:text-purple-100 hover:bg-purple-500/10'
             }`}
           >
             {voted ? '❤️' : '🤍'} {votes}
@@ -182,7 +205,7 @@ function PlayPageInner({ id }: { id: string }) {
           <button
             onClick={handleShare}
             title="Copy share link"
-            className="text-xs text-gray-400 hover:text-white px-2.5 py-1.5 rounded-lg hover:bg-gray-800 transition-colors"
+            className="text-xs text-purple-300/50 hover:text-purple-100 px-2.5 py-1.5 rounded-lg hover:bg-purple-500/10 transition-colors"
           >
             {copied ? 'Copied!' : '🔗'}
           </button>
@@ -190,7 +213,7 @@ function PlayPageInner({ id }: { id: string }) {
             <button
               onClick={() => router.push(`/template/${widget.id}?edit=1`)}
               title="You created this — edit it directly"
-              className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-3 py-1.5 rounded-lg hover:from-emerald-700 hover:to-teal-700 transition-all"
+              className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-3 py-1.5 rounded-lg hover:from-emerald-500 hover:to-teal-500 transition-all"
             >
               ✏️ Edit
             </button>
@@ -198,7 +221,7 @@ function PlayPageInner({ id }: { id: string }) {
             canRemix && (
               <button
                 onClick={() => router.push(remixHref)}
-                className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white px-3 py-1.5 rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all"
+                className="flex items-center gap-1 text-xs font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white px-3 py-1.5 rounded-lg hover:from-purple-500 hover:to-pink-500 neon-glow-purple transition-all"
               >
                 ✨ Remix
               </button>
@@ -209,16 +232,16 @@ function PlayPageInner({ id }: { id: string }) {
 
       {/* How to play — collapsible */}
       {widget.description && (
-        <div className="shrink-0 border-b border-gray-800">
+        <div className="shrink-0 border-b border-purple-500/25">
           <button
             onClick={() => setShowHowTo((v) => !v)}
-            className="w-full flex items-center justify-between px-4 py-2 text-xs font-semibold text-gray-500 hover:bg-gray-800/50 transition-colors"
+            className="w-full flex items-center justify-between px-4 py-2 text-xs font-semibold text-purple-300/60 hover:bg-purple-500/10 transition-colors"
           >
             <span>How to Play</span>
             <span>{showHowTo ? '▲' : '▼'}</span>
           </button>
           {showHowTo && (
-            <p className="px-4 pb-3 text-xs text-gray-400 leading-relaxed">
+            <p className="px-4 pb-3 text-xs text-purple-200/60 leading-relaxed">
               {widget.description}
             </p>
           )}
@@ -239,7 +262,7 @@ function PlayPageInner({ id }: { id: string }) {
             title={widget.title}
           />
         ) : (
-          <p className="text-center text-gray-500 p-8">No game content</p>
+          <p className="text-center text-purple-300/50 p-8">No game content</p>
         )}
       </div>
     </div>
