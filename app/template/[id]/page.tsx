@@ -754,10 +754,11 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         <div className="w-16" />
       </header>
 
-      {/* Body */}
-      <div className="flex-1 min-h-0 flex flex-row">
+      {/* Body — stacks vertically on mobile (game on top, chat below),
+          side-by-side from md up so phones can actually use the builder. */}
+      <div className="flex-1 min-h-0 flex flex-col md:flex-row">
         {/* Game iframe */}
-        <div className="flex-1 min-h-0 relative">
+        <div className="relative min-h-0 h-[42vh] md:h-auto md:flex-1">
           {chatStatus === 'generating' && (
             <GeneratingBanner
               version={remixCount + 1}
@@ -775,7 +776,7 @@ export default function TemplatePage({ params }: { params: Promise<{ id: string 
         </div>
 
         {/* Sidebar — Chat thread */}
-        <div className="shrink-0 w-96 flex flex-col border-l border-purple-500/25 bg-[#150f24]">
+        <div className="flex flex-col min-h-0 w-full flex-1 md:w-96 md:flex-none border-t md:border-t-0 md:border-l border-purple-500/25 bg-[#150f24]">
           {/* Thread header */}
           <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-purple-500/25">
             <div className="flex items-center gap-2">
