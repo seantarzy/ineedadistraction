@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Press_Start_2P, VT323 } from "next/font/google";
 import { ClerkProvider } from '@clerk/nextjs';
 import Script from 'next/script';
-import DataDiveFeedback from "./components/DataDiveFeedback";
 import AutoClaim from "./components/AutoClaim";
 import "./globals.css";
 
@@ -37,7 +36,6 @@ export default function RootLayout({
         <body className="antialiased">
           {children}
           <AutoClaim />
-          <DataDiveFeedback siteSlug="ineedadistraction" accentColor="#a855f7" />
           {GA_ID && (
             <>
               <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />

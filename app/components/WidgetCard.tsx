@@ -105,41 +105,45 @@ export default function WidgetCard({ widget, onPlay }: Props) {
       )}
 
       {/* Actions */}
-      <div className="flex items-center gap-2 mt-auto">
-        <button
-          onClick={() => onPlay(widget)}
-          className="flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-xl py-2 text-sm font-semibold transition-colors"
-        >
-          ▶ Play
-        </button>
-
+      <div className="mt-auto flex flex-col gap-2">
+        {/* Remix is the core loop — loud, full-width, glowing CTA on top */}
         {widget.html && widget.remixable !== false && (
           <button
             onClick={(e) => { e.stopPropagation(); trackCTAClick({ cta_text: 'Remix', cta_location: 'widget_card', cta_destination: `/template/${widget.id}` }); router.push(`/template/${widget.id}`); }}
-            title="Remix this game"
-            className="bg-white/20 hover:bg-white/30 rounded-xl px-3 py-2 text-sm font-semibold transition-colors"
+            title="Remix this game — tweak it with AI and make it your own"
+            className="w-full flex items-center justify-center gap-2 bg-white text-gray-900 hover:bg-white rounded-xl py-3 text-base font-extrabold shadow-[0_0_16px_rgba(255,255,255,0.45)] hover:shadow-[0_0_26px_rgba(255,255,255,0.8)] transition-all"
           >
-            ✨
+            ✨ Remix this game
           </button>
         )}
 
-        <button
-          onClick={handleVote}
-          title={voted ? 'Unlike' : 'Like this game'}
-          className={`flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
-            voted ? 'bg-white/40' : 'bg-white/20 hover:bg-white/30'
-          }`}
-        >
-          {voted ? '❤️' : '🤍'} {votes}
-        </button>
+        {/* Secondary: Play + vote + share */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onPlay(widget)}
+            className="flex-1 bg-white/20 hover:bg-white/30 backdrop-blur-sm rounded-xl py-2 text-sm font-semibold transition-colors"
+          >
+            ▶ Play
+          </button>
 
-        <button
-          onClick={handleShare}
-          title="Copy share link"
-          className="bg-white/20 hover:bg-white/30 rounded-xl px-3 py-2 text-sm transition-colors"
-        >
-          {copied ? '✅' : '🔗'}
-        </button>
+          <button
+            onClick={handleVote}
+            title={voted ? 'Unlike' : 'Like this game'}
+            className={`flex items-center gap-1 rounded-xl px-3 py-2 text-sm font-semibold transition-colors ${
+              voted ? 'bg-white/40' : 'bg-white/20 hover:bg-white/30'
+            }`}
+          >
+            {voted ? '❤️' : '🤍'} {votes}
+          </button>
+
+          <button
+            onClick={handleShare}
+            title="Copy share link"
+            className="bg-white/20 hover:bg-white/30 rounded-xl px-3 py-2 text-sm transition-colors"
+          >
+            {copied ? '✅' : '🔗'}
+          </button>
+        </div>
       </div>
     </div>
   );
