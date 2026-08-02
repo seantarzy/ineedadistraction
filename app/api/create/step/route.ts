@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { compactHtml, extractHtmlDocument } from '@/app/lib/htmlCompact';
+import { enforceRateLimit } from '@/app/lib/rateLimit';
 
 const client = new Anthropic();
 
@@ -106,6 +107,15 @@ async function callSonnetWithRetry(stableUserContent: string, dynamicUserContent
 }
 
 export async function POST(req: Request) {
+  // Steps are the per-instruction Anthropic calls of a multi-step build; cap
+  // generously (a plan can be several steps, and users run several builds).
+  const limited = await enforceRateLimit(
+    req,
+    { name: 'create-step', limit: 150, windowSec: 3600 },
+    "You've hit the build limit for now — take a short break and try again in a bit.",
+  );
+  if (limited) return limited;
+
   const { currentHtml, planSummary, allSteps, stepIndex } = await req.json();
 
   if (!currentHtml || typeof currentHtml !== 'string') {

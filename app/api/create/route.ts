@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Anthropic from '@anthropic-ai/sdk';
 import { compactHtml, extractHtmlDocument } from '@/app/lib/htmlCompact';
+import { enforceRateLimit } from '@/app/lib/rateLimit';
 
 // Pro plan caps maxDuration; Hobby silently clamps to 60. 300s = headroom for
 // outlier first-generations of complex games; the typical one finishes in 30-60s.
@@ -243,6 +244,15 @@ async function validateGame(html: string): Promise<string[]> {
 
 // ─── Route ────────────────────────────────────────────────────────────────────
 export async function POST(req: Request) {
+  // Each generation fans out to several Anthropic calls — cap it per caller so
+  // real spend is bounded and the endpoint can't be scripted into a huge bill.
+  const limited = await enforceRateLimit(
+    req,
+    { name: 'create', limit: 20, windowSec: 3600 },
+    "You've hit the game-generation limit for now — take a short break and try again in a bit.",
+  );
+  if (limited) return limited;
+
   const { prompt, baseHtml, plan } = await req.json();
 
   if (!prompt) {

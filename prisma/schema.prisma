@@ -132,3 +132,14 @@ model DailyPuzzle {
 
   @@index([date])
 }
+
+// Fixed-window rate-limit counters. One row per (bucket:identity) key — e.g.
+// "create:u:user_123" or "chat:ip:1.2.3.4". `count` resets to 1 once now()
+// passes `resetAt`. Written via an atomic upsert (see app/lib/rateLimit.ts).
+model RateLimit {
+  key     String   @id
+  count   Int      @default(0)
+  resetAt DateTime
+
+  @@index([resetAt])
+}

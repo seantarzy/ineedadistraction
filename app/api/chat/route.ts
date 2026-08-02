@@ -3,6 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getDraft, createDraft, ownsDraft } from '@/app/lib/drafts';
 import { getMessages, addMessage } from '@/app/lib/messages';
 import { resolveOwner } from '@/app/lib/owner';
+import { enforceRateLimit } from '@/app/lib/rateLimit';
 
 export const maxDuration = 30;
 
@@ -75,6 +76,14 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: Request) {
   const owner = await resolveOwner(req);
   if (!owner) return NextResponse.json({ error: 'No owner identity' }, { status: 401 });
+
+  // Every chat turn is an Anthropic call (and may kick off a generation); cap it.
+  const limited = await enforceRateLimit(
+    req,
+    { name: 'chat', limit: 80, windowSec: 3600 },
+    "You're sending messages faster than we can build — give it a minute and try again.",
+  );
+  if (limited) return limited;
 
   const { draftId: incomingDraftId, userMessage, currentHtml, templateId, emoji } = await req.json();
   if (!userMessage || typeof userMessage !== 'string') {
