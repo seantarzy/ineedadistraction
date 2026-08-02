@@ -67,6 +67,20 @@ function PlayPageInner({ id }: { id: string }) {
   const [showHowTo, setShowHowTo] = useState(false);
   const [votes, setVotes] = useState(0);
   const [voted, setVoted] = useState(false);
+  const [reportState, setReportState] = useState<'idle' | 'open' | 'sending' | 'sent'>('idle');
+
+  async function submitReport(reason: string) {
+    if (!widget) return;
+    setReportState('sending');
+    try {
+      await fetch(`/api/widgets/${widget.id}/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+    } catch { /* best-effort; still thank the user */ }
+    setReportState('sent');
+  }
 
   useEffect(() => {
     fetch(`/api/widgets/${id}`)
@@ -205,6 +219,15 @@ function PlayPageInner({ id }: { id: string }) {
           >
             {copied ? 'Copied!' : '🔗'}
           </button>
+          {!isAuthor && (
+            <button
+              onClick={() => setReportState('open')}
+              title="Report this game"
+              className="text-xs text-purple-300/40 hover:text-red-300 px-2 py-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
+            >
+              ⚐
+            </button>
+          )}
           {isAuthor ? (
             <button
               onClick={() => router.push(`/template/${widget.id}?edit=1`)}
@@ -261,6 +284,62 @@ function PlayPageInner({ id }: { id: string }) {
           <p className="text-center text-purple-300/50 p-8">No game content</p>
         )}
       </div>
+
+      {/* Report modal */}
+      {reportState !== 'idle' && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => reportState !== 'sending' && setReportState('idle')}
+        >
+          <div
+            className="bg-[#150f24] rounded-2xl border border-purple-500/30 w-full max-w-sm p-6 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {reportState === 'sent' ? (
+              <>
+                <p className="text-3xl">🙏</p>
+                <h3 className="mt-2 font-bold text-purple-100">Thanks for the heads-up</h3>
+                <p className="mt-1 text-sm text-purple-300/60">We&rsquo;ll review this game.</p>
+                <button
+                  onClick={() => setReportState('idle')}
+                  className="mt-5 w-full bg-purple-600 hover:bg-purple-500 text-white font-semibold py-2.5 rounded-xl transition-colors"
+                >
+                  Done
+                </button>
+              </>
+            ) : (
+              <>
+                <h3 className="font-bold text-purple-100">Report this game</h3>
+                <p className="mt-1 text-sm text-purple-300/60">What&rsquo;s wrong with it?</p>
+                <div className="mt-4 flex flex-col gap-2">
+                  {([
+                    ['inappropriate', '🚫 Inappropriate or offensive'],
+                    ['broken', '🐛 Broken / doesn’t work'],
+                    ['spam', '🗑 Spam or misleading'],
+                    ['other', '⚠️ Something else'],
+                  ] as [string, string][]).map(([reason, label]) => (
+                    <button
+                      key={reason}
+                      disabled={reportState === 'sending'}
+                      onClick={() => submitReport(reason)}
+                      className="w-full text-left text-sm text-purple-100 bg-[#0a0612] border border-purple-500/20 hover:border-pink-400/60 rounded-xl px-4 py-3 transition-colors disabled:opacity-50"
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setReportState('idle')}
+                  disabled={reportState === 'sending'}
+                  className="mt-4 text-xs text-purple-300/50 hover:text-purple-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

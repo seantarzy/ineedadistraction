@@ -143,3 +143,16 @@ model RateLimit {
 
   @@index([resetAt])
 }
+
+// User-submitted reports of published games (abuse / broken / spam). Loosely
+// coupled to Widget by id so a report survives the game being deleted.
+model Report {
+  id        String   @id @default(cuid())
+  widgetId  String
+  reason    String
+  reporter  String? // u:<userId> | c:<clientId> | ip:<ip>
+  createdAt DateTime @default(now())
+
+  @@index([widgetId])
+  @@index([createdAt])
+}

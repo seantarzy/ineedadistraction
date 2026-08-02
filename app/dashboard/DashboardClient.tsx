@@ -511,6 +511,15 @@ function HomeContent() {
             </div>
           </div>
         )}
+
+        {/* Footer */}
+        <footer className="mt-16 border-t border-purple-500/15 pt-6 pb-2 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-purple-300/40">
+          <span>© {new Date().getFullYear()} I Need a Distraction</span>
+          <span className="hidden sm:inline">·</span>
+          <a href="/privacy" className="hover:text-purple-200 transition-colors">Privacy</a>
+          <span className="hidden sm:inline">·</span>
+          <a href="/terms" className="hover:text-purple-200 transition-colors">Terms</a>
+        </footer>
       </main>
 
       {showCreate && <CreateModal onClose={() => setShowCreate(false)} />}
